@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -27,6 +29,8 @@ var (
 	queryMaxAge            = kingpin.Flag("query-max-age", "How back in the past metrics can be queried at most.").Default("24h").Duration()
 	tenantsCount           = kingpin.Flag("tenants-count", "Number of tenants to fake.").Default("1").Int()
 	seriesCount            = kingpin.Flag("series-count", "Number of series to generate for each tenant.").Default("1000").Int()
+	oooSeriesCount         = kingpin.Flag("out-of-order-series-count", "Number of out of order series to generate for each tenant.").Default("0").Int()
+	maxOOOTime             = kingpin.Flag("max-out-of-order-time", "How old an out of order sample can be *in minutes*.").Default("40").Int()
 	serverMetricsPort      = kingpin.Flag("server-metrics-port", "The port where metrics are exposed.").Default("9900").Int()
 )
 
@@ -52,6 +56,7 @@ func main() {
 	queryClients := make([]*client.QueryClient, 0, *tenantsCount)
 	wg := sync.WaitGroup{}
 	wg.Add(*tenantsCount)
+	rand.Seed(time.Now().UnixMilli())
 
 	for t := 1; t <= *tenantsCount; t++ {
 		userID := fmt.Sprintf("load-generator-%d", t)
@@ -64,6 +69,8 @@ func main() {
 			WriteBatchSize:   *remoteBatchSize,
 			UserID:           userID,
 			SeriesCount:      *seriesCount,
+			OOOSeriesCount:   *oooSeriesCount,
+			MaxOOOTime:       *maxOOOTime,
 		}, logger))
 
 		if *queryEnabled == "true" {
@@ -74,6 +81,7 @@ func main() {
 				QueryTimeout:          *queryTimeout,
 				QueryMaxAge:           *queryMaxAge,
 				ExpectedSeries:        *seriesCount,
+				ExpectedOOOSeries:     *oooSeriesCount,
 				ExpectedWriteInterval: *remoteWriteInterval,
 			}, logger, reg)
 
