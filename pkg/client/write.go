@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -33,7 +34,10 @@ type WriteClientConfig struct {
 	UserID string
 
 	// Number of series to generate per write request.
-	SeriesCount int
+	SeriesCount    int
+	OOOSeriesCount int
+
+	MaxOOOTime int
 
 	WriteInterval    time.Duration
 	WriteTimeout     time.Duration
@@ -79,7 +83,9 @@ func (c *WriteClient) run() {
 
 func (c *WriteClient) writeSeries() {
 	ts := alignTimestampToInterval(time.Now(), c.cfg.WriteInterval)
-	series := generateSineWaveSeries(ts, c.cfg.SeriesCount)
+	series := make([]*prompb.TimeSeries, 0, c.cfg.SeriesCount+c.cfg.OOOSeriesCount)
+	series = generateSineWaveSeries(ts, c.cfg.SeriesCount, series)
+	series = generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval, series)
 
 	// Honor the batch size.
 	wg := sync.WaitGroup{}
@@ -160,12 +166,11 @@ func alignTimestampToInterval(ts time.Time, interval time.Duration) time.Time {
 	return time.Unix(0, (ts.UnixNano()/int64(interval))*int64(interval))
 }
 
-func generateSineWaveSeries(t time.Time, seriesCount int) []*prompb.TimeSeries {
-	out := make([]*prompb.TimeSeries, 0, seriesCount)
+func generateSineWaveSeries(t time.Time, seriesCount int, buf []*prompb.TimeSeries) []*prompb.TimeSeries {
 	value := generateSineWaveValue(t)
 
 	for i := 1; i <= seriesCount; i++ {
-		out = append(out, &prompb.TimeSeries{
+		buf = append(buf, &prompb.TimeSeries{
 			Labels: []*prompb.Label{{
 				Name:  "__name__",
 				Value: "cortex_load_generator_sine_wave",
@@ -180,7 +185,31 @@ func generateSineWaveSeries(t time.Time, seriesCount int) []*prompb.TimeSeries {
 		})
 	}
 
-	return out
+	return buf
+}
+
+func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, interval time.Duration, buf []*prompb.TimeSeries) []*prompb.TimeSeries {
+	for i := 1; i <= oooSeriesCount; i++ {
+		diffMs := rand.Int63n(int64(maxOOOMins) * time.Minute.Milliseconds())
+		ts := t.Add(-time.Duration(diffMs) * time.Millisecond)
+		ts = alignTimestampToInterval(ts, interval)
+
+		buf = append(buf, &prompb.TimeSeries{
+			Labels: []*prompb.Label{{
+				Name:  "__name__",
+				Value: "cortex_load_generator_out_of_order_sine_wave",
+			}, {
+				Name:  "wave",
+				Value: strconv.Itoa(i),
+			}},
+			Samples: []prompb.Sample{{
+				Value:     generateSineWaveValue(ts),
+				Timestamp: ts.UnixMilli(),
+			}},
+		})
+	}
+
+	return buf
 }
 
 func generateSineWaveValue(t time.Time) float64 {
