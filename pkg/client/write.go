@@ -82,40 +82,42 @@ func (c *WriteClient) run() {
 }
 
 func (c *WriteClient) writeSeries() {
-	ts := alignTimestampToInterval(time.Now(), c.cfg.WriteInterval)
-	series := make([]*prompb.TimeSeries, 0, c.cfg.SeriesCount+c.cfg.OOOSeriesCount)
-	series = generateSineWaveSeries(ts, c.cfg.SeriesCount, series)
-	series = generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval, series)
-
-	// Honor the batch size.
 	wg := sync.WaitGroup{}
+	writeSeries := func(series []*prompb.TimeSeries) {
+		// Honor the batch size.
+		for o := 0; o < len(series); o += c.cfg.WriteBatchSize {
+			wg.Add(1)
 
-	for o := 0; o < len(series); o += c.cfg.WriteBatchSize {
-		wg.Add(1)
+			go func(o int) {
+				defer wg.Done()
 
-		go func(o int) {
-			defer wg.Done()
+				// Honow the max concurrency
+				ctx := context.Background()
+				c.writeGate.Start(ctx)
+				defer c.writeGate.Done()
 
-			// Honow the max concurrency
-			ctx := context.Background()
-			c.writeGate.Start(ctx)
-			defer c.writeGate.Done()
+				end := o + c.cfg.WriteBatchSize
+				if end > len(series) {
+					end = len(series)
+				}
 
-			end := o + c.cfg.WriteBatchSize
-			if end > len(series) {
-				end = len(series)
-			}
+				req := &prompb.WriteRequest{
+					Timeseries: series[o:end],
+				}
 
-			req := &prompb.WriteRequest{
-				Timeseries: series[o:end],
-			}
-
-			err := c.send(ctx, req)
-			if err != nil {
-				level.Error(c.logger).Log("msg", "failed to write series", "err", err)
-			}
-		}(o)
+				err := c.send(ctx, req)
+				if err != nil {
+					level.Error(c.logger).Log("msg", "failed to write series", "err", err)
+				}
+			}(o)
+		}
 	}
+
+	ts := alignTimestampToInterval(time.Now(), c.cfg.WriteInterval)
+	series1 := generateSineWaveSeries(ts, c.cfg.SeriesCount)
+	series2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval)
+	writeSeries(series1)
+	writeSeries(series2)
 
 	wg.Wait()
 }
@@ -166,11 +168,12 @@ func alignTimestampToInterval(ts time.Time, interval time.Duration) time.Time {
 	return time.Unix(0, (ts.UnixNano()/int64(interval))*int64(interval))
 }
 
-func generateSineWaveSeries(t time.Time, seriesCount int, buf []*prompb.TimeSeries) []*prompb.TimeSeries {
+func generateSineWaveSeries(t time.Time, seriesCount int) []*prompb.TimeSeries {
+	out := make([]*prompb.TimeSeries, 0, seriesCount)
 	value := generateSineWaveValue(t)
 
 	for i := 1; i <= seriesCount; i++ {
-		buf = append(buf, &prompb.TimeSeries{
+		out = append(out, &prompb.TimeSeries{
 			Labels: []*prompb.Label{{
 				Name:  "__name__",
 				Value: "cortex_load_generator_sine_wave",
@@ -185,16 +188,17 @@ func generateSineWaveSeries(t time.Time, seriesCount int, buf []*prompb.TimeSeri
 		})
 	}
 
-	return buf
+	return out
 }
 
-func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, interval time.Duration, buf []*prompb.TimeSeries) []*prompb.TimeSeries {
+func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, interval time.Duration) []*prompb.TimeSeries {
+	out := make([]*prompb.TimeSeries, 0, oooSeriesCount)
 	for i := 1; i <= oooSeriesCount; i++ {
 		diffMs := rand.Int63n(int64(maxOOOMins) * time.Minute.Milliseconds())
 		ts := t.Add(-time.Duration(diffMs) * time.Millisecond)
 		ts = alignTimestampToInterval(ts, interval)
 
-		buf = append(buf, &prompb.TimeSeries{
+		out = append(out, &prompb.TimeSeries{
 			Labels: []*prompb.Label{{
 				Name:  "__name__",
 				Value: "cortex_load_generator_out_of_order_sine_wave",
@@ -209,7 +213,7 @@ func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, inte
 		})
 	}
 
-	return buf
+	return out
 }
 
 func generateSineWaveValue(t time.Time) float64 {
