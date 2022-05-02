@@ -36,8 +36,8 @@ const (
 type QueryClientConfig struct {
 	URL string
 
-	// The tenant ID to use to push metrics to Cortex.
-	UserID string
+	// The tenantID for querying metrics.
+	TenantID string
 
 	QueryInterval time.Duration
 	QueryTimeout  time.Duration
@@ -61,7 +61,7 @@ type QueryClient struct {
 
 func NewQueryClient(cfg QueryClientConfig, logger log.Logger, reg prometheus.Registerer) *QueryClient {
 	var rt http.RoundTripper = &http.Transport{}
-	rt = &clientRoundTripper{userID: cfg.UserID, rt: rt}
+	rt = &clientRoundTripper{tenantID: cfg.TenantID, rt: rt}
 
 	apiCfg := api.Config{
 		Address:      cfg.URL,
@@ -77,17 +77,17 @@ func NewQueryClient(cfg QueryClientConfig, logger log.Logger, reg prometheus.Reg
 		cfg:       cfg,
 		client:    v1.NewAPI(client),
 		startTime: time.Now().UTC(),
-		logger:    log.With(logger, "user", cfg.UserID),
+		logger:    log.With(logger, "tenant", cfg.TenantID),
 
 		queriesTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name:        "cortex_load_generator_queries_total",
 			Help:        "Total number of attempted queries.",
-			ConstLabels: map[string]string{"user": cfg.UserID},
+			ConstLabels: map[string]string{"tenant": cfg.TenantID},
 		}, []string{"result"}),
 		resultsComparedTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name:        "cortex_load_generator_query_results_compared_total",
 			Help:        "Total number of query results compared.",
-			ConstLabels: map[string]string{"user": cfg.UserID},
+			ConstLabels: map[string]string{"tenant": cfg.TenantID},
 		}, []string{"result"}),
 	}
 

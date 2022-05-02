@@ -30,8 +30,8 @@ type WriteClientConfig struct {
 	// Cortex URL.
 	URL url.URL
 
-	// The tenant ID to use to push metrics to Cortex.
-	UserID string
+	// The tenantID for pushing metrics.
+	TenantID string
 
 	// Number of series to generate per write request.
 	SeriesCount    int
@@ -54,7 +54,7 @@ type WriteClient struct {
 
 func NewWriteClient(cfg WriteClientConfig, logger log.Logger) *WriteClient {
 	var rt http.RoundTripper = &http.Transport{}
-	rt = &clientRoundTripper{userID: cfg.UserID, rt: rt}
+	rt = &clientRoundTripper{tenantID: cfg.TenantID, rt: rt}
 
 	c := &WriteClient{
 		client:    &http.Client{Transport: rt},

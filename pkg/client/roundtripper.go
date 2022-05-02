@@ -3,14 +3,14 @@ package client
 import "net/http"
 
 type clientRoundTripper struct {
-	userID string
-	rt     http.RoundTripper
+	tenantID string
+	rt       http.RoundTripper
 }
 
 // Add the tenant ID header required by Cortex
 func (rt *clientRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = cloneRequest(req)
-	req.Header.Set("X-Scope-OrgID", rt.userID)
+	req.Header.Set("X-Scope-OrgID", rt.tenantID)
 	return rt.rt.RoundTrip(req)
 }
 

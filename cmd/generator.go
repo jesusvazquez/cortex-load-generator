@@ -59,7 +59,7 @@ func main() {
 	rand.Seed(time.Now().UnixMilli())
 
 	for t := 1; t <= *tenantsCount; t++ {
-		userID := fmt.Sprintf("load-generator-%d", t)
+		tenantID := fmt.Sprintf("load-generator-%d", t)
 
 		writeClients = append(writeClients, client.NewWriteClient(client.WriteClientConfig{
 			URL:              **remoteURL,
@@ -67,7 +67,7 @@ func main() {
 			WriteTimeout:     *remoteWriteTimeout,
 			WriteConcurrency: *remoteWriteConcurrency,
 			WriteBatchSize:   *remoteBatchSize,
-			UserID:           userID,
+			TenantID:         tenantID,
 			SeriesCount:      *seriesCount,
 			OOOSeriesCount:   *oooSeriesCount,
 			MaxOOOTime:       *maxOOOTime,
@@ -76,7 +76,7 @@ func main() {
 		if *queryEnabled == "true" {
 			queryClient := client.NewQueryClient(client.QueryClientConfig{
 				URL:                   *queryURL,
-				UserID:                userID,
+				TenantID:              tenantID,
 				QueryInterval:         *queryInterval,
 				QueryTimeout:          *queryTimeout,
 				QueryMaxAge:           *queryMaxAge,
