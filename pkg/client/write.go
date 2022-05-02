@@ -217,8 +217,7 @@ func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, inte
 }
 
 func generateSineWaveValue(t time.Time) float64 {
-	// With a 15-second scrape interval this gives a ten-minute period
-	period := float64(40 * (15 * time.Second))
+	period := float64(10 * time.Minute)
 	radians := float64(t.UnixNano()) / period * 2 * math.Pi
 	return math.Sin(radians)
 }
