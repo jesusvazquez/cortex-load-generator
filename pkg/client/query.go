@@ -185,7 +185,7 @@ func (c *QueryClient) runQuery(query string, start, end time.Time, step time.Dur
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.QueryTimeout)
 	defer cancel()
 
-	value, _, err := c.client.QueryRange(ctx, "sum(cortex_load_generator_sine_wave)", v1.Range{
+	value, _, err := c.client.QueryRange(ctx, query, v1.Range{
 		Start: start,
 		End:   end,
 		Step:  step,
