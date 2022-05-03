@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -18,6 +17,9 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
+	"github.com/pracucci/cortex-load-generator/pkg/expectation"
+	"github.com/pracucci/cortex-load-generator/pkg/gen"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/gate"
 	"github.com/prometheus/prometheus/prompb"
 )
@@ -49,10 +51,11 @@ type WriteClient struct {
 	client    *http.Client
 	cfg       WriteClientConfig
 	writeGate *gate.Gate
+	exp       *expectation.Expectation
 	logger    log.Logger
 }
 
-func NewWriteClient(cfg WriteClientConfig, logger log.Logger) *WriteClient {
+func NewWriteClient(cfg WriteClientConfig, exp *expectation.Expectation, logger log.Logger) *WriteClient {
 	var rt http.RoundTripper = &http.Transport{}
 	rt = &clientRoundTripper{tenantID: cfg.TenantID, rt: rt}
 
@@ -60,6 +63,7 @@ func NewWriteClient(cfg WriteClientConfig, logger log.Logger) *WriteClient {
 		client:    &http.Client{Transport: rt},
 		cfg:       cfg,
 		writeGate: gate.New(cfg.WriteConcurrency),
+		exp:       exp,
 		logger:    logger,
 	}
 
@@ -114,12 +118,23 @@ func (c *WriteClient) writeSeries() {
 	}
 
 	ts := alignTimestampToInterval(time.Now(), c.cfg.WriteInterval)
-	series1 := generateSineWaveSeries(ts, c.cfg.SeriesCount)
-	series2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval)
-	writeSeries(series1)
-	writeSeries(series2)
+	series1, vals := generateSineWaveSeries(ts, c.cfg.SeriesCount, c.cfg.WriteInterval)
+	series2, syn2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval)
 
-	wg.Wait()
+	c.exp.Adjust(func(e *expectation.Expectation) {
+		writeSeries(series1)
+		writeSeries(series2)
+
+		e.Funcs = vals
+
+		for selector, sample := range syn2 {
+			s := model.SamplePair{model.Time(sample.Timestamp), model.SampleValue(sample.Value)}
+			e.Data[selector] = append(e.Data[selector], s)
+		}
+
+		wg.Wait()
+		e.ValidFrom = time.Now().Add(2 * time.Second)
+	})
 }
 
 func (c *WriteClient) send(ctx context.Context, req *prompb.WriteRequest) error {
@@ -168,11 +183,15 @@ func alignTimestampToInterval(ts time.Time, interval time.Duration) time.Time {
 	return time.Unix(0, (ts.UnixNano()/int64(interval))*int64(interval))
 }
 
-func generateSineWaveSeries(t time.Time, seriesCount int) []*prompb.TimeSeries {
+func generateSineWaveSeries(t time.Time, seriesCount int, step time.Duration) ([]*prompb.TimeSeries, map[string]expectation.Validator) {
 	out := make([]*prompb.TimeSeries, 0, seriesCount)
-	value := generateSineWaveValue(t)
+	vals := make(map[string]expectation.Validator)
 
 	for i := 1; i <= seriesCount; i++ {
+		sample := prompb.Sample{
+			Value:     gen.Sine(t) * float64(i),
+			Timestamp: t.UnixMilli(),
+		}
 		out = append(out, &prompb.TimeSeries{
 			Labels: []*prompb.Label{{
 				Name:  "__name__",
@@ -181,22 +200,26 @@ func generateSineWaveSeries(t time.Time, seriesCount int) []*prompb.TimeSeries {
 				Name:  "wave",
 				Value: strconv.Itoa(i),
 			}},
-			Samples: []prompb.Sample{{
-				Value:     value,
-				Timestamp: t.UnixMilli(),
-			}},
+			Samples: []prompb.Sample{sample},
 		})
+		vals[fmt.Sprintf("cortex_load_generator_sine_wave{wave=\"%d\"}[60s]", i)] = expectation.GetSineWaveSequenceValidator(i, step)
 	}
 
-	return out
+	return out, vals
 }
 
-func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, interval time.Duration) []*prompb.TimeSeries {
+func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, interval time.Duration) ([]*prompb.TimeSeries, map[string]prompb.Sample) {
 	out := make([]*prompb.TimeSeries, 0, oooSeriesCount)
+	synopsis := make(map[string]prompb.Sample)
 	for i := 1; i <= oooSeriesCount; i++ {
 		diffMs := rand.Int63n(int64(maxOOOMins) * time.Minute.Milliseconds())
 		ts := t.Add(-time.Duration(diffMs) * time.Millisecond)
 		ts = alignTimestampToInterval(ts, interval)
+
+		sample := prompb.Sample{
+			Value:     gen.Sine(ts) * float64(i),
+			Timestamp: ts.UnixMilli(),
+		}
 
 		out = append(out, &prompb.TimeSeries{
 			Labels: []*prompb.Label{{
@@ -206,18 +229,10 @@ func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, inte
 				Name:  "wave",
 				Value: strconv.Itoa(i),
 			}},
-			Samples: []prompb.Sample{{
-				Value:     generateSineWaveValue(ts),
-				Timestamp: ts.UnixMilli(),
-			}},
+			Samples: []prompb.Sample{sample},
 		})
+		synopsis[fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}[60s]", i)] = sample
 	}
 
-	return out
-}
-
-func generateSineWaveValue(t time.Time) float64 {
-	period := float64(10 * time.Minute)
-	radians := float64(t.UnixNano()) / period * 2 * math.Pi
-	return math.Sin(radians)
+	return out, synopsis
 }

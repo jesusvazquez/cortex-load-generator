@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/pracucci/cortex-load-generator/pkg/expectation"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,8 +18,6 @@ import (
 )
 
 const (
-	maxComparisonDelta = 0.001
-
 	comparisonSuccess    = "success"
 	comparisonFailed     = "fail"
 	oooComparisonSuccess = "ooo_success"
@@ -52,6 +50,7 @@ type QueryClient struct {
 	cfg       QueryClientConfig
 	client    v1.API
 	startTime time.Time
+	exp       *expectation.Expectation
 	logger    log.Logger
 
 	// Metrics.
@@ -59,7 +58,7 @@ type QueryClient struct {
 	resultsComparedTotal *prometheus.CounterVec
 }
 
-func NewQueryClient(cfg QueryClientConfig, logger log.Logger, reg prometheus.Registerer) *QueryClient {
+func NewQueryClient(cfg QueryClientConfig, exp *expectation.Expectation, logger log.Logger, reg prometheus.Registerer) *QueryClient {
 	var rt http.RoundTripper = &http.Transport{}
 	rt = &clientRoundTripper{tenantID: cfg.TenantID, rt: rt}
 
@@ -77,6 +76,7 @@ func NewQueryClient(cfg QueryClientConfig, logger log.Logger, reg prometheus.Reg
 		cfg:       cfg,
 		client:    v1.NewAPI(client),
 		startTime: time.Now().UTC(),
+		exp:       exp,
 		logger:    log.With(logger, "tenant", cfg.TenantID),
 
 		queriesTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
@@ -107,8 +107,8 @@ func (c *QueryClient) Start() {
 }
 
 func (c *QueryClient) run() {
-	q := "sum(cortex_load_generator_sine_wave)"
-	qOOO := "sum(cortex_load_generator_out_of_order_sine_wave)"
+	q := "cortex_load_generator_sine_wave{wave=\"1\"}[60s]"
+	qOOO := "cortex_load_generator_out_of_order_sine_wave{wave=\"1\"}[60s]"
 	c.runQueryAndVerifyResult(q, querySkipped, queryFailed, querySuccess, comparisonSuccess, comparisonFailed)
 	c.runQueryAndVerifyResult(qOOO, oooQuerySkipped, oooQueryFailed, oooQuerySuccess, oooComparisonSuccess, oooComparisonFailed)
 
@@ -125,16 +125,14 @@ func (c *QueryClient) run() {
 
 func (c *QueryClient) runQueryAndVerifyResult(query, lblSkip, lblFail, lblSuccess, lblMatch, lblNomatch string) {
 	// Compute the query start/end time.
-	start, end, ok := c.getQueryTimeRange(time.Now().UTC())
+	_, end, ok := c.getQueryTimeRange(time.Now().UTC())
 	if !ok {
 		level.Debug(c.logger).Log("msg", "query skipped because of no eligible time range to query")
 		c.queriesTotal.WithLabelValues(lblSkip).Inc()
 		return
 	}
 
-	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval)
-
-	samples, err := c.runQuery(query, start, end, step)
+	samples, err := c.runQuery(query, end)
 	if err != nil {
 		level.Error(c.logger).Log("msg", "failed to execute query", "err", err)
 		c.queriesTotal.WithLabelValues(lblFail).Inc()
@@ -143,7 +141,7 @@ func (c *QueryClient) runQueryAndVerifyResult(query, lblSkip, lblFail, lblSucces
 
 	c.queriesTotal.WithLabelValues(lblSuccess).Inc()
 
-	err = verifySineWaveSamples(samples, c.cfg.ExpectedSeries, step)
+	err = c.exp.Validate(query, samples)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "query result comparison failed", "err", err)
 		c.resultsComparedTotal.WithLabelValues(lblNomatch).Inc()
@@ -153,15 +151,11 @@ func (c *QueryClient) runQueryAndVerifyResult(query, lblSkip, lblFail, lblSucces
 	c.resultsComparedTotal.WithLabelValues(lblMatch).Inc()
 }
 
-func (c *QueryClient) runQuery(query string, start, end time.Time, step time.Duration) ([]model.SamplePair, error) {
+func (c *QueryClient) runQuery(query string, ts time.Time) ([]model.SamplePair, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.QueryTimeout)
 	defer cancel()
 
-	value, _, err := c.client.QueryRange(ctx, query, v1.Range{
-		Start: start,
-		End:   end,
-		Step:  step,
-	})
+	value, _, err := c.client.Query(ctx, query, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -179,12 +173,7 @@ func (c *QueryClient) runQuery(query string, start, end time.Time, step time.Dur
 		return nil, fmt.Errorf("expected 1 series in the result but got %d", len(matrix))
 	}
 
-	var result []model.SamplePair
-	for _, stream := range matrix {
-		result = append(result, stream.Values...)
-	}
-
-	return result, nil
+	return matrix[0].Values, nil
 }
 
 func (c *QueryClient) getQueryTimeRange(now time.Time) (start, end time.Time, ok bool) {
@@ -204,66 +193,4 @@ func (c *QueryClient) getQueryTimeRange(now time.Time) (start, end time.Time, ok
 	ok = end.After(start)
 
 	return
-}
-
-func (c *QueryClient) getQueryStep(start, end time.Time, writeInterval time.Duration) time.Duration {
-	const maxSamples = 1000
-
-	// Compute the number of samples that we would have if we every single sample.
-	actualSamples := end.Sub(start) / writeInterval
-	if actualSamples <= maxSamples {
-		return writeInterval
-	}
-
-	// Adjust the query step based on the max steps spread over the query time range,
-	// rounding it to write interval.
-	step := end.Sub(start) / time.Duration(maxSamples)
-	step = ((step / writeInterval) + 1) * writeInterval
-
-	return step
-}
-
-func verifySineWaveSamples(samples []model.SamplePair, expectedSeries int, expectedStep time.Duration) error {
-	for idx, sample := range samples {
-		ts := time.UnixMilli(int64(sample.Timestamp)).UTC()
-
-		// Assert on value.
-		expectedValue := generateSineWaveValue(ts)
-		if !compareSampleValues(float64(sample.Value), expectedValue*float64(expectedSeries)) {
-			return fmt.Errorf("sample at timestamp %d (%s) has value %f while was expecting %f", sample.Timestamp, ts.String(), sample.Value, expectedValue)
-		}
-
-		// Assert on sample timestamp. We expect no gaps.
-		if idx > 0 {
-			prevTs := time.UnixMilli(int64(samples[idx-1].Timestamp)).UTC()
-			expectedTs := prevTs.Add(expectedStep)
-
-			if ts.UnixMilli() != expectedTs.UnixMilli() {
-				return fmt.Errorf("sample at timestamp %d (%s) was expected to have timestamp %d (%s) because previous sample had timestamp %d (%s)",
-					sample.Timestamp, ts.String(), expectedTs.UnixMilli(), expectedTs.String(), prevTs.UnixMilli(), prevTs.String())
-			}
-		}
-	}
-
-	return nil
-}
-
-// verifySineWaveSampleValues checks only the correctness of values w.r.t. the timestamp.
-func verifySineWaveSampleValues(samples []model.SamplePair, expectedSeries int) error {
-	for _, sample := range samples {
-		ts := time.UnixMilli(int64(sample.Timestamp)).UTC()
-
-		// Assert on value.
-		expectedValue := generateSineWaveValue(ts)
-		if !compareSampleValues(float64(sample.Value), expectedValue*float64(expectedSeries)) {
-			return fmt.Errorf("sample at timestamp %d (%s) has value %f while was expecting %f", sample.Timestamp, ts.String(), sample.Value, expectedValue)
-		}
-	}
-
-	return nil
-}
-
-func compareSampleValues(actual, expected float64) bool {
-	delta := math.Abs((actual - expected) / maxComparisonDelta)
-	return delta < maxComparisonDelta
 }
