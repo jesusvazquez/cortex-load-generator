@@ -107,78 +107,50 @@ func (c *QueryClient) Start() {
 }
 
 func (c *QueryClient) run() {
-	c.runQueryAndVerifyResult()
-	c.runOOOQueryAndVerifyResult()
+	q := "sum(cortex_load_generator_sine_wave)"
+	qOOO := "sum(cortex_load_generator_out_of_order_sine_wave)"
+	c.runQueryAndVerifyResult(q, querySkipped, queryFailed, querySuccess, comparisonSuccess, comparisonFailed)
+	c.runQueryAndVerifyResult(qOOO, oooQuerySkipped, oooQueryFailed, oooQuerySuccess, oooComparisonSuccess, oooComparisonFailed)
 
 	ticker := time.NewTicker(c.cfg.QueryInterval)
 
 	for {
 		select {
 		case <-ticker.C:
-			c.runQueryAndVerifyResult()
-			c.runOOOQueryAndVerifyResult()
+			c.runQueryAndVerifyResult(q, querySkipped, queryFailed, querySuccess, comparisonSuccess, comparisonFailed)
+			c.runQueryAndVerifyResult(qOOO, oooQuerySkipped, oooQueryFailed, oooQuerySuccess, oooComparisonSuccess, oooComparisonFailed)
 		}
 	}
 }
 
-func (c *QueryClient) runQueryAndVerifyResult() {
+func (c *QueryClient) runQueryAndVerifyResult(query, lblSkip, lblFail, lblSuccess, lblMatch, lblNomatch string) {
 	// Compute the query start/end time.
 	start, end, ok := c.getQueryTimeRange(time.Now().UTC())
 	if !ok {
 		level.Debug(c.logger).Log("msg", "query skipped because of no eligible time range to query")
-		c.queriesTotal.WithLabelValues(querySkipped).Inc()
+		c.queriesTotal.WithLabelValues(lblSkip).Inc()
 		return
 	}
 
 	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval)
 
-	samples, err := c.runQuery("sum(cortex_load_generator_sine_wave)", start, end, step)
+	samples, err := c.runQuery(query, start, end, step)
 	if err != nil {
 		level.Error(c.logger).Log("msg", "failed to execute query", "err", err)
-		c.queriesTotal.WithLabelValues(queryFailed).Inc()
+		c.queriesTotal.WithLabelValues(lblFail).Inc()
 		return
 	}
 
-	c.queriesTotal.WithLabelValues(querySuccess).Inc()
+	c.queriesTotal.WithLabelValues(lblSuccess).Inc()
 
 	err = verifySineWaveSamples(samples, c.cfg.ExpectedSeries, step)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "query result comparison failed", "err", err)
-		c.resultsComparedTotal.WithLabelValues(comparisonFailed).Inc()
+		c.resultsComparedTotal.WithLabelValues(lblNomatch).Inc()
 		return
 	}
 
-	c.resultsComparedTotal.WithLabelValues(comparisonSuccess).Inc()
-}
-
-func (c *QueryClient) runOOOQueryAndVerifyResult() {
-	// Compute the query start/end time.
-	start, end, ok := c.getQueryTimeRange(time.Now().UTC())
-	if !ok {
-		level.Debug(c.logger).Log("msg", "query skipped because of no eligible time range to query")
-		c.queriesTotal.WithLabelValues(oooQuerySkipped).Inc()
-		return
-	}
-
-	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval)
-
-	samples, err := c.runQuery("sum(cortex_load_generator_out_of_order_sine_wave)", start, end, step)
-	if err != nil {
-		level.Error(c.logger).Log("msg", "failed to execute ooo query", "err", err)
-		c.queriesTotal.WithLabelValues(oooQueryFailed).Inc()
-		return
-	}
-
-	c.queriesTotal.WithLabelValues(oooQuerySuccess).Inc()
-
-	err = verifySineWaveSampleValues(samples, c.cfg.ExpectedOOOSeries)
-	if err != nil {
-		level.Warn(c.logger).Log("msg", "ooo query result comparison failed", "err", err)
-		c.resultsComparedTotal.WithLabelValues(oooComparisonFailed).Inc()
-		return
-	}
-
-	c.resultsComparedTotal.WithLabelValues(oooComparisonSuccess).Inc()
+	c.resultsComparedTotal.WithLabelValues(lblMatch).Inc()
 }
 
 func (c *QueryClient) runQuery(query string, start, end time.Time, step time.Duration) ([]model.SamplePair, error) {
