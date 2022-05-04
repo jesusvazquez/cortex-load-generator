@@ -13,7 +13,7 @@ import (
 
 const maxComparisonDelta = 0.001
 
-type Validator func([]model.SamplePair) error
+type Validator func(start, end time.Time, result []model.SamplePair) error
 
 // Expectation describes which responses are expected from the TSDB, and starting from when.
 // The writer client can update the expectation and the reader can make assertions on it.
@@ -40,7 +40,7 @@ func (e *Expectation) Adjust(fn Adjustment) {
 	e.Unlock()
 }
 
-func (e *Expectation) Validate(selector string, result []model.SamplePair) error {
+func (e *Expectation) Validate(selector string, start, end time.Time, result []model.SamplePair) error {
 	e.Lock()
 	defer e.Unlock()
 	now := time.Now()
@@ -49,13 +49,16 @@ func (e *Expectation) Validate(selector string, result []model.SamplePair) error
 	}
 	exp, ok := e.Data[selector]
 	if ok {
+		exp.TrimLeft(start.UnixMilli())
+		exp.TrimRight(end.UnixMilli())
+
 		if diff := cmp.Diff(exp.samples, result); diff != "" {
-			return fmt.Errorf("expectation mismatch (-want +got):\n%s", diff)
+			return fmt.Errorf("expectation mismatch\nEXP%s\nGOT%s\n-want +got):\n%s", exp.samples, result, diff)
 		}
 	}
 	fn, ok := e.Funcs[selector]
 	if ok {
-		return fn(result)
+		return fn(start, end, result)
 	}
 	return nil
 }
@@ -63,8 +66,8 @@ func (e *Expectation) Validate(selector string, result []model.SamplePair) error
 // GetSineWaveSequenceValidator returns a validator which checks that the values are a contiguous sequence constituting a sine series multiplied by the given factor.
 // TODO: validate start and end.
 func GetSineWaveSequenceValidator(factor int, expectedStep time.Duration) Validator {
-	return func(samples []model.SamplePair) error {
-		for idx, sample := range samples {
+	return func(start, end time.Time, result []model.SamplePair) error {
+		for idx, sample := range result {
 			ts := time.UnixMilli(int64(sample.Timestamp)).UTC()
 
 			// Assert on value.
@@ -75,7 +78,7 @@ func GetSineWaveSequenceValidator(factor int, expectedStep time.Duration) Valida
 
 			// Assert on sample timestamp. We expect no gaps.
 			if idx > 0 {
-				prevTs := time.UnixMilli(int64(samples[idx-1].Timestamp)).UTC()
+				prevTs := time.UnixMilli(int64(result[idx-1].Timestamp)).UTC()
 				expectedTs := prevTs.Add(expectedStep)
 
 				if ts.UnixMilli() != expectedTs.UnixMilli() {

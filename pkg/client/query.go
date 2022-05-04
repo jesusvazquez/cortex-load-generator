@@ -107,8 +107,8 @@ func (c *QueryClient) Start() {
 }
 
 func (c *QueryClient) run() {
-	q := "cortex_load_generator_sine_wave{wave=\"1\"}[60s]"
-	qOOO := "cortex_load_generator_out_of_order_sine_wave{wave=\"1\"}[60s]"
+	q := "cortex_load_generator_sine_wave{wave=\"1\"}"
+	qOOO := "cortex_load_generator_out_of_order_sine_wave{wave=\"1\"}"
 	c.runQueryAndVerifyResult(q, querySkipped, queryFailed, querySuccess, comparisonSuccess, comparisonFailed)
 	c.runQueryAndVerifyResult(qOOO, oooQuerySkipped, oooQueryFailed, oooQuerySuccess, oooComparisonSuccess, oooComparisonFailed)
 
@@ -132,7 +132,10 @@ func (c *QueryClient) runQueryAndVerifyResult(query, lblSkip, lblFail, lblSucces
 		return
 	}
 
-	samples, err := c.runQuery(query, end)
+	// TODO make this configurable and make it always match the [60s] below
+	start := end.Add(-time.Minute)
+
+	samples, err := c.runQuery(query+"[60s]", end)
 	if err != nil {
 		level.Error(c.logger).Log("msg", "failed to execute query", "err", err)
 		c.queriesTotal.WithLabelValues(lblFail).Inc()
@@ -141,9 +144,9 @@ func (c *QueryClient) runQueryAndVerifyResult(query, lblSkip, lblFail, lblSucces
 
 	c.queriesTotal.WithLabelValues(lblSuccess).Inc()
 
-	err = c.exp.Validate(query, samples)
+	err = c.exp.Validate(query, start, end, samples)
 	if err != nil {
-		level.Warn(c.logger).Log("msg", "query result comparison failed", "err", err)
+		level.Warn(c.logger).Log("msg", "query result comparison failed", "start", start.UnixMilli(), "end", end.UnixMilli(), "err", err)
 		c.resultsComparedTotal.WithLabelValues(lblNomatch).Inc()
 		return
 	}

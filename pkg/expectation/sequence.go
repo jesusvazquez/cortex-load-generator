@@ -8,7 +8,7 @@ import (
 
 // OOOChunk maintains samples in time-ascending order.
 // Inserts for timestamps already seen, are dropped (until we need more advanced cases).
-// Samples are stored uncompressed to allow easy sorting.
+// Samples are stored uncompressed to allow easy sorting and trimming.
 type Sequence struct {
 	samples []model.SamplePair
 }
@@ -41,4 +41,25 @@ func (o *Sequence) Insert(_t int64, _v float64) bool {
 	o.samples[i] = model.SamplePair{t, v}
 
 	return true
+}
+
+// TrimLeft removes all elements <t, if any.
+func (o *Sequence) TrimLeft(t int64) {
+	for i := len(o.samples) - 1; i >= 0; i-- {
+		if o.samples[i].Timestamp < model.Time(t) {
+			copy(o.samples, o.samples[i+1:])
+			o.samples = o.samples[:len(o.samples)-i-1]
+			return
+		}
+	}
+}
+
+// TrimRight removes all elements >t, if any.
+func (o *Sequence) TrimRight(t int64) {
+	for i, s := range o.samples {
+		if s.Timestamp > model.Time(t) {
+			o.samples = o.samples[:i]
+			return
+		}
+	}
 }

@@ -204,7 +204,7 @@ func generateSineWaveSeries(t time.Time, seriesCount int, step time.Duration) ([
 			}},
 			Samples: []prompb.Sample{sample},
 		})
-		vals[fmt.Sprintf("cortex_load_generator_sine_wave{wave=\"%d\"}[60s]", i)] = expectation.GetSineWaveSequenceValidator(i, step)
+		vals[fmt.Sprintf("cortex_load_generator_sine_wave{wave=\"%d\"}", i)] = expectation.GetSineWaveSequenceValidator(i, step)
 	}
 
 	return out, vals
@@ -233,7 +233,7 @@ func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, inte
 			}},
 			Samples: []prompb.Sample{sample},
 		})
-		synopsis[fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}[60s]", i)] = sample
+		synopsis[fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i)] = sample
 	}
 
 	return out, synopsis
