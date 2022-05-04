@@ -19,7 +19,6 @@ import (
 	"github.com/golang/snappy"
 	"github.com/pracucci/cortex-load-generator/pkg/expectation"
 	"github.com/pracucci/cortex-load-generator/pkg/gen"
-	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/gate"
 	"github.com/prometheus/prometheus/prompb"
 )
@@ -128,8 +127,11 @@ func (c *WriteClient) writeSeries() {
 		e.Funcs = vals
 
 		for selector, sample := range syn2 {
-			s := model.SamplePair{model.Time(sample.Timestamp), model.SampleValue(sample.Value)}
-			e.Data[selector] = append(e.Data[selector], s)
+			_, ok := e.Data[selector]
+			if !ok {
+				e.Data[selector] = expectation.NewSequence()
+			}
+			e.Data[selector].Insert(sample.Timestamp, sample.Value)
 		}
 
 		wg.Wait()

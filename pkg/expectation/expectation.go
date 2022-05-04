@@ -19,14 +19,14 @@ type Validator func([]model.SamplePair) error
 // The writer client can update the expectation and the reader can make assertions on it.
 type Expectation struct {
 	ValidFrom time.Time
-	Data      map[string][]model.SamplePair // validations which specify, for a selector, all the specified points
-	Funcs     map[string]Validator          // validations which specify, for a selector, a function to run on the response
+	Data      map[string]*Sequence // validations which specify, for a selector, all the specified samples
+	Funcs     map[string]Validator // validations which specify, for a selector, a function to run on the response
 	sync.Mutex
 }
 
 func NewExpectation() *Expectation {
 	return &Expectation{
-		Data:  make(map[string][]model.SamplePair),
+		Data:  make(map[string]*Sequence),
 		Funcs: make(map[string]Validator),
 	}
 }
@@ -49,7 +49,7 @@ func (e *Expectation) Validate(selector string, result []model.SamplePair) error
 	}
 	exp, ok := e.Data[selector]
 	if ok {
-		if diff := cmp.Diff(exp, result); diff != "" {
+		if diff := cmp.Diff(exp.samples, result); diff != "" {
 			return fmt.Errorf("expectation mismatch (-want +got):\n%s", diff)
 		}
 	}
