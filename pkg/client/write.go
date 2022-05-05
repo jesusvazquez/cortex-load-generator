@@ -146,7 +146,7 @@ func (c *WriteClient) writeSeries() {
 					return
 				}
 				c.reqTotal.WithLabelValues(kind, resOk).Inc()
-				c.samplesTotal.WithLabelValues(kind).Inc()
+				c.samplesTotal.WithLabelValues(kind).Add(float64(end - o))
 
 			}(o)
 		}

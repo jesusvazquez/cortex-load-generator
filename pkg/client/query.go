@@ -118,16 +118,18 @@ func (c *QueryClient) run() {
 	_, end, ok := c.getQueryTimeRange(time.Now().UTC())
 	if !ok {
 		level.Debug(c.logger).Log("msg", "queries skipped because of no eligible time range to query")
-		c.queriesTotal.WithLabelValues(querySkipped).Add(float64(c.cfg.ExpectedOOOSeries))
+		c.queriesTotal.WithLabelValues(querySkipped).Add(float64(c.cfg.ExpectedSeries))
 		c.queriesTotal.WithLabelValues(oooQuerySkipped).Add(float64(c.cfg.ExpectedOOOSeries))
 		return
 	}
 
-	for i := 1; i <= c.cfg.ExpectedOOOSeries; i++ {
-		// TODO: something more clever than running all these queries at once. e.g. smoothing over time and/or only querying a subset
+	// TODO: something more clever than running all these queries at once. e.g. smoothing over time and/or only querying a subset
+	for i := 1; i <= c.cfg.ExpectedSeries; i++ {
 		q := fmt.Sprintf("cortex_load_generator_sine_wave{wave=\"%d\"}", i)
-		qOOO := fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d1\"}", i)
 		c.runQueryAndVerifyResult(q, end, queryFailed, querySuccess, comparisonSuccess, comparisonFailed)
+	}
+	for i := 1; i <= c.cfg.ExpectedOOOSeries; i++ {
+		qOOO := fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i)
 		c.runQueryAndVerifyResult(qOOO, end, oooQueryFailed, oooQuerySuccess, oooComparisonSuccess, oooComparisonFailed)
 	}
 }
