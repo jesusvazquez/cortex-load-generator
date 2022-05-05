@@ -17,3 +17,11 @@ Flags:
   --series-count=1000          Number of series to generate for each tenant.
   --version                    Show application version.
 ```
+
+## Running it in docker-compose against a real prometheus server
+
+```
+make
+cd docker-compose
+docker compose up
+```

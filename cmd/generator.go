@@ -10,6 +10,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/pracucci/cortex-load-generator/pkg/client"
+	"github.com/pracucci/cortex-load-generator/pkg/expectation"
 	"github.com/pracucci/cortex-load-generator/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -59,7 +60,9 @@ func main() {
 	rand.Seed(time.Now().UnixMilli())
 
 	for t := 1; t <= *tenantsCount; t++ {
-		userID := fmt.Sprintf("load-generator-%d", t)
+		tenantID := fmt.Sprintf("load-generator-%d", t)
+
+		exp := expectation.NewExpectation()
 
 		writeClients = append(writeClients, client.NewWriteClient(client.WriteClientConfig{
 			URL:              **remoteURL,
@@ -67,23 +70,23 @@ func main() {
 			WriteTimeout:     *remoteWriteTimeout,
 			WriteConcurrency: *remoteWriteConcurrency,
 			WriteBatchSize:   *remoteBatchSize,
-			UserID:           userID,
+			TenantID:         tenantID,
 			SeriesCount:      *seriesCount,
 			OOOSeriesCount:   *oooSeriesCount,
 			MaxOOOTime:       *maxOOOTime,
-		}, logger))
+		}, exp, logger, reg))
 
 		if *queryEnabled == "true" {
 			queryClient := client.NewQueryClient(client.QueryClientConfig{
 				URL:                   *queryURL,
-				UserID:                userID,
+				TenantID:              tenantID,
 				QueryInterval:         *queryInterval,
 				QueryTimeout:          *queryTimeout,
 				QueryMaxAge:           *queryMaxAge,
 				ExpectedSeries:        *seriesCount,
 				ExpectedOOOSeries:     *oooSeriesCount,
 				ExpectedWriteInterval: *remoteWriteInterval,
-			}, logger, reg)
+			}, exp, logger, reg)
 
 			queryClient.Start()
 			queryClients = append(queryClients, queryClient)

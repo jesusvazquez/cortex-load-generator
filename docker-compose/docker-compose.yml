@@ -1,0 +1,32 @@
+version: '2'
+
+services:
+  prometheus:
+    hostname: prometheus
+    image: prom/prometheus:out-of-order
+    command: --web.enable-remote-write-receiver --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.ooo-allowance=60m
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    expose:
+      - 9090
+    ports:
+      - 9091:9090
+
+  generator:
+    hostname: generator
+    image: cortex-load-generator
+    command: --remote-url http://prometheus:9090/api/v1/write --query-enabled=true --query-url=http://prometheus:9090 --max-out-of-order-time 1 --series-count 1 --out-of-order-series-count 1
+    expose:
+     - 6060
+    links:
+     - prometheus
+
+  grafana:
+    hostname: grafana
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./datasources:/etc/grafana/provisioning/datasources
+      - ./dashboards-main:/etc/grafana/provisioning/dashboards
+      - ./dashboards:/var/lib/grafana/dashboards
