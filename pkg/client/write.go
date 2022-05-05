@@ -19,12 +19,20 @@ import (
 	"github.com/golang/snappy"
 	"github.com/pracucci/cortex-load-generator/pkg/expectation"
 	"github.com/pracucci/cortex-load-generator/pkg/gen"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/prometheus/pkg/gate"
 	"github.com/prometheus/prometheus/prompb"
 )
 
 const (
 	maxErrMsgLen = 256
+
+	kindNormal = "normal"
+	kindOOO    = "ooo"
+
+	resOk   = "ok"
+	resFail = "fail"
 )
 
 type WriteClientConfig struct {
@@ -52,9 +60,12 @@ type WriteClient struct {
 	writeGate *gate.Gate
 	exp       *expectation.Expectation
 	logger    log.Logger
+
+	samplesTotal *prometheus.CounterVec
+	reqTotal     *prometheus.CounterVec
 }
 
-func NewWriteClient(cfg WriteClientConfig, exp *expectation.Expectation, logger log.Logger) *WriteClient {
+func NewWriteClient(cfg WriteClientConfig, exp *expectation.Expectation, logger log.Logger, reg prometheus.Registerer) *WriteClient {
 	var rt http.RoundTripper = &http.Transport{}
 	rt = &clientRoundTripper{tenantID: cfg.TenantID, rt: rt}
 
@@ -64,6 +75,26 @@ func NewWriteClient(cfg WriteClientConfig, exp *expectation.Expectation, logger 
 		writeGate: gate.New(cfg.WriteConcurrency),
 		exp:       exp,
 		logger:    logger,
+
+		samplesTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name:        "cortex_load_generator_samples_written_total",
+			Help:        "Total number of written samples.",
+			ConstLabels: map[string]string{"tenant": cfg.TenantID},
+		}, []string{"kind"}),
+
+		reqTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name:        "cortex_load_generator_write_req_total",
+			Help:        "Total number of write requests.",
+			ConstLabels: map[string]string{"tenant": cfg.TenantID},
+		}, []string{"kind", "result"}),
+	}
+
+	// Init metrics.
+	for _, kind := range []string{kindNormal, kindOOO} {
+		c.samplesTotal.WithLabelValues(kind).Add(0)
+		for _, result := range []string{resOk, resFail} {
+			c.reqTotal.WithLabelValues(kind, result).Add(0)
+		}
 	}
 
 	go c.run()
@@ -86,7 +117,7 @@ func (c *WriteClient) run() {
 
 func (c *WriteClient) writeSeries() {
 	wg := sync.WaitGroup{}
-	writeSeries := func(series []*prompb.TimeSeries) {
+	writeSeries := func(series []*prompb.TimeSeries, kind string) {
 		// Honor the batch size.
 		for o := 0; o < len(series); o += c.cfg.WriteBatchSize {
 			wg.Add(1)
@@ -110,8 +141,13 @@ func (c *WriteClient) writeSeries() {
 
 				err := c.send(ctx, req)
 				if err != nil {
-					level.Error(c.logger).Log("msg", "failed to write series", "err", err)
+					level.Error(c.logger).Log("msg", "failed to write series", "kind", kind, "err", err)
+					c.reqTotal.WithLabelValues(kind, resFail).Inc()
+					return
 				}
+				c.reqTotal.WithLabelValues(kind, resOk).Inc()
+				c.samplesTotal.WithLabelValues(kind).Inc()
+
 			}(o)
 		}
 	}
@@ -121,8 +157,8 @@ func (c *WriteClient) writeSeries() {
 	series2, syn2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval)
 
 	c.exp.Adjust(func(e *expectation.Expectation) {
-		writeSeries(series1)
-		writeSeries(series2)
+		writeSeries(series1, kindNormal)
+		writeSeries(series2, kindOOO)
 
 		e.Funcs = vals
 

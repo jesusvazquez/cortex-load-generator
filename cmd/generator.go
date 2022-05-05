@@ -74,7 +74,7 @@ func main() {
 			SeriesCount:      *seriesCount,
 			OOOSeriesCount:   *oooSeriesCount,
 			MaxOOOTime:       *maxOOOTime,
-		}, exp, logger))
+		}, exp, logger, reg))
 
 		if *queryEnabled == "true" {
 			queryClient := client.NewQueryClient(client.QueryClientConfig{
