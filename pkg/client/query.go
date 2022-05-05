@@ -103,34 +103,36 @@ func NewQueryClient(cfg QueryClientConfig, exp *expectation.Expectation, logger 
 }
 
 func (c *QueryClient) Start() {
-	go c.run()
+	go func() {
+		c.run()
+		ticker := time.NewTicker(c.cfg.QueryInterval)
+		for range ticker.C {
+			c.run()
+		}
+	}()
+
 }
 
 func (c *QueryClient) run() {
-	q := "cortex_load_generator_sine_wave{wave=\"1\"}"
-	qOOO := "cortex_load_generator_out_of_order_sine_wave{wave=\"1\"}"
-	c.runQueryAndVerifyResult(q, querySkipped, queryFailed, querySuccess, comparisonSuccess, comparisonFailed)
-	c.runQueryAndVerifyResult(qOOO, oooQuerySkipped, oooQueryFailed, oooQuerySuccess, oooComparisonSuccess, oooComparisonFailed)
-
-	ticker := time.NewTicker(c.cfg.QueryInterval)
-
-	for {
-		select {
-		case <-ticker.C:
-			c.runQueryAndVerifyResult(q, querySkipped, queryFailed, querySuccess, comparisonSuccess, comparisonFailed)
-			c.runQueryAndVerifyResult(qOOO, oooQuerySkipped, oooQueryFailed, oooQuerySuccess, oooComparisonSuccess, oooComparisonFailed)
-		}
-	}
-}
-
-func (c *QueryClient) runQueryAndVerifyResult(query, lblSkip, lblFail, lblSuccess, lblMatch, lblNomatch string) {
 	// Compute the query start/end time.
 	_, end, ok := c.getQueryTimeRange(time.Now().UTC())
 	if !ok {
-		level.Debug(c.logger).Log("msg", "query skipped because of no eligible time range to query")
-		c.queriesTotal.WithLabelValues(lblSkip).Inc()
+		level.Debug(c.logger).Log("msg", "queries skipped because of no eligible time range to query")
+		c.queriesTotal.WithLabelValues(querySkipped).Add(float64(c.cfg.ExpectedOOOSeries))
+		c.queriesTotal.WithLabelValues(oooQuerySkipped).Add(float64(c.cfg.ExpectedOOOSeries))
 		return
 	}
+
+	for i := 1; i <= c.cfg.ExpectedOOOSeries; i++ {
+		// TODO: something more clever than running all these queries at once. e.g. smoothing over time and/or only querying a subset
+		q := fmt.Sprintf("cortex_load_generator_sine_wave{wave=\"%d\"}", i)
+		qOOO := fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d1\"}", i)
+		c.runQueryAndVerifyResult(q, end, queryFailed, querySuccess, comparisonSuccess, comparisonFailed)
+		c.runQueryAndVerifyResult(qOOO, end, oooQueryFailed, oooQuerySuccess, oooComparisonSuccess, oooComparisonFailed)
+	}
+}
+
+func (c *QueryClient) runQueryAndVerifyResult(query string, end time.Time, lblFail, lblSuccess, lblMatch, lblNomatch string) {
 
 	// TODO make this configurable and make it always match the [60s] below
 	start := end.Add(-time.Minute)
