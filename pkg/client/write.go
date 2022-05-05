@@ -171,7 +171,7 @@ func (c *WriteClient) writeSeries() {
 		}
 
 		wg.Wait()
-		e.ValidFrom = time.Now().Add(2 * time.Second)
+		e.ValidFrom = time.Now().Add(2 * time.Second) // this should be enough for reads to include our writes.
 	})
 }
 
