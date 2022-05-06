@@ -177,7 +177,8 @@ func (c *QueryClient) runQuery(query string, ts time.Time) ([]model.SamplePair, 
 	}
 
 	if len(matrix) != 1 {
-		return nil, fmt.Errorf("expected 1 series in the result but got %d", len(matrix))
+
+		return nil, fmt.Errorf("query %q with ts %v (now is %v) -> expected 1 series in the result but got %d", query, ts, time.Now(), len(matrix))
 	}
 
 	return matrix[0].Values, nil
@@ -186,6 +187,8 @@ func (c *QueryClient) runQuery(query string, ts time.Time) ([]model.SamplePair, 
 func (c *QueryClient) getQueryTimeRange(now time.Time) (start, end time.Time, ok bool) {
 	// Do not query the last 2 scape interval to give enough time to all write
 	// requests to successfully complete.
+
+	// set end between now-2*writeInterval and now-3writeInterval
 	end = alignTimestampToInterval(now.Add(-2*c.cfg.ExpectedWriteInterval), c.cfg.ExpectedWriteInterval)
 
 	// Do not query before the start time because the config may have been different (eg. number of series).

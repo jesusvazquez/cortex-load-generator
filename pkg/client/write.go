@@ -116,7 +116,7 @@ func (c *WriteClient) run() {
 }
 
 func (c *WriteClient) writeSeries() {
-	wg := sync.WaitGroup{}
+	wg := &sync.WaitGroup{}
 	writeSeries := func(series []*prompb.TimeSeries, kind string) {
 		// Honor the batch size.
 		for o := 0; o < len(series); o += c.cfg.WriteBatchSize {
@@ -139,7 +139,7 @@ func (c *WriteClient) writeSeries() {
 					Timeseries: series[o:end],
 				}
 
-				err := c.send(ctx, req)
+				err := c.send(ctx, req, kind)
 				if err != nil {
 					level.Error(c.logger).Log("msg", "failed to write series", "kind", kind, "err", err)
 					c.reqTotal.WithLabelValues(kind, resFail).Inc()
@@ -175,7 +175,12 @@ func (c *WriteClient) writeSeries() {
 	})
 }
 
-func (c *WriteClient) send(ctx context.Context, req *prompb.WriteRequest) error {
+func (c *WriteClient) send(ctx context.Context, req *prompb.WriteRequest, kind string) error {
+	for _, r := range req.Timeseries {
+		for _, s := range r.Samples {
+			level.Error(c.logger).Log("msg", "DIETER WRITE", "kind", kind, "name", r.Labels[0].Value, "ts", s.Timestamp, "v", s.Value)
+		}
+	}
 	data, err := proto.Marshal(req)
 	if err != nil {
 		return err
