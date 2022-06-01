@@ -135,7 +135,6 @@ func (c *QueryClient) run() {
 }
 
 func (c *QueryClient) runQueryAndVerifyResult(query string, end time.Time, lblFail, lblSuccess, lblMatch, lblNomatch string) {
-
 	// TODO make this configurable and make it always match the [60s] below
 	start := end.Add(-time.Minute)
 

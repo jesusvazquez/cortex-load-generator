@@ -3,12 +3,14 @@ package expectation
 import (
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/pracucci/cortex-load-generator/pkg/gen"
 	"github.com/prometheus/common/model"
+
+	"github.com/pracucci/cortex-load-generator/pkg/gen"
 )
 
 const maxComparisonDelta = 0.001
@@ -52,8 +54,35 @@ func (e *Expectation) Validate(selector string, start, end time.Time, result []m
 		exp.TrimLeft(start.UnixMilli())
 		exp.TrimRight(end.UnixMilli())
 
-		if diff := cmp.Diff(exp.samples, result); diff != "" {
-			return fmt.Errorf("expectation mismatch\nEXP%s\nGOT%s\n-want +got):\n%s", exp.samples, result, diff)
+		sort.Slice(exp.samples, func(i, j int) bool {
+			return exp.samples[i].Timestamp < exp.samples[j].Timestamp
+		})
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].Timestamp < result[j].Timestamp
+		})
+
+		// Let's consider two cases here.
+		// If we got all the expeted samples in the result thats almost what we want so lets differentiate
+		diff := cmp.Diff(exp.samples, result)
+		if len(exp.samples) > len(result) {
+			return fmt.Errorf("expectation mismatch 1 - len(EXP) > len(GOT) (%d>%d) and GOT should be at least same size  \nEXP%s\nGOT%s\n-want +got):\n%s", len(exp.samples), len(result), exp.samples, result, diff)
+		}
+
+		for i := 0; i < len(exp.samples); i++ {
+			found := false
+			for j := 0; j < len(result); j++ {
+				if exp.samples[i].Value == result[j].Value && exp.samples[i].Timestamp == result[j].Timestamp {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("expectation mismatch 2 - at least one expected sample was not found \nEXP%s\nGOT%s\n-want +got):\n%s", exp.samples, result, diff)
+			}
+		}
+
+		if diff != "" {
+			return fmt.Errorf("expectation mismatch 3 - results are different, dont know why yet\nEXP%s\nGOT%s\n-want +got):\n%s", exp.samples, result, diff)
 		}
 	}
 	fn, ok := e.Funcs[selector]

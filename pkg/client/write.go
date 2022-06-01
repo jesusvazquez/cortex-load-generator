@@ -29,8 +29,8 @@ import (
 const (
 	maxErrMsgLen = 256
 
-	kindNormal = "normal"
-	kindOOO    = "ooo"
+	kindInOrder = "in-order"
+	kindOOO     = "ooo"
 
 	resOk   = "ok"
 	resFail = "fail"
@@ -91,7 +91,7 @@ func NewWriteClient(cfg WriteClientConfig, exp *expectation.Expectation, logger 
 	}
 
 	// Init metrics.
-	for _, kind := range []string{kindNormal, kindOOO} {
+	for _, kind := range []string{kindInOrder, kindOOO} {
 		c.samplesTotal.WithLabelValues(kind).Add(0)
 		for _, result := range []string{resOk, resFail} {
 			c.reqTotal.WithLabelValues(kind, result).Add(0)
@@ -148,7 +148,6 @@ func (c *WriteClient) writeSeries() {
 				}
 				c.reqTotal.WithLabelValues(kind, resOk).Inc()
 				c.samplesTotal.WithLabelValues(kind).Add(float64(end - o))
-
 			}(o)
 		}
 	}
@@ -158,7 +157,7 @@ func (c *WriteClient) writeSeries() {
 	series2, syn2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval)
 
 	c.exp.Adjust(func(e *expectation.Expectation) {
-		writeSeries(series1, kindNormal)
+		writeSeries(series1, kindInOrder)
 		writeSeries(series2, kindOOO)
 
 		e.Funcs = vals
