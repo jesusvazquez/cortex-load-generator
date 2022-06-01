@@ -17,12 +17,13 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
-	"github.com/pracucci/cortex-load-generator/pkg/expectation"
-	"github.com/pracucci/cortex-load-generator/pkg/gen"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/prometheus/pkg/gate"
 	"github.com/prometheus/prometheus/prompb"
+
+	"github.com/pracucci/cortex-load-generator/pkg/expectation"
+	"github.com/pracucci/cortex-load-generator/pkg/gen"
 )
 
 const (
@@ -125,7 +126,7 @@ func (c *WriteClient) writeSeries() {
 			go func(o int) {
 				defer wg.Done()
 
-				// Honow the max concurrency
+				// Honor the max concurrency
 				ctx := context.Background()
 				c.writeGate.Start(ctx)
 				defer c.writeGate.Done()
@@ -265,13 +266,16 @@ func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, inte
 		}
 
 		out = append(out, &prompb.TimeSeries{
-			Labels: []*prompb.Label{{
-				Name:  "__name__",
-				Value: "cortex_load_generator_out_of_order_sine_wave",
-			}, {
-				Name:  "wave",
-				Value: strconv.Itoa(i),
-			}},
+			Labels: []*prompb.Label{
+				{
+					Name:  "__name__",
+					Value: "cortex_load_generator_out_of_order_sine_wave",
+				},
+				{
+					Name:  "wave",
+					Value: strconv.Itoa(i),
+				},
+			},
 			Samples: []prompb.Sample{sample},
 		})
 		synopsis[fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i)] = sample
