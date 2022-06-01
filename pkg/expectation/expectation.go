@@ -18,7 +18,7 @@ type Validator func(start, end time.Time, result []model.SamplePair) error
 // Expectation describes which responses are expected from the TSDB, and starting from when.
 // The writer client can update the expectation and the reader can make assertions on it.
 type Expectation struct {
-	ValidFrom time.Time
+	ValidFrom time.Time            // wallclock time at which queries should see the data that was written when this validFrom was set.
 	Data      map[string]*Sequence // validations which specify, for a selector, all the specified samples
 	Funcs     map[string]Validator // validations which specify, for a selector, a function to run on the response
 	sync.Mutex
