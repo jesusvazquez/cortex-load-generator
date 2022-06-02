@@ -116,6 +116,7 @@ func (c *WriteClient) writeSeries() {
 	ts := alignTimestampToInterval(time.Now(), c.cfg.WriteInterval)
 	series1 := generateSineWaveSeries(ts, c.cfg.SeriesCount)
 	series2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval)
+	// Update repository
 	writeSeries(series1)
 	writeSeries(series2)
 

@@ -139,6 +139,19 @@ func (c *QueryClient) runQueryAndVerifyResult() {
 		return
 	}
 
+	// Check samples against repository
+	// Write: 4,5 - 6,7,8,9,10 - 1,2,3 [4,5,6,7,8,9,10,1,2,3]
+	// Read: 8,9
+	// Check: [4,5,6,7,8,9,10,1,2,3], [4,5,6,7,8,9,10,1,2], [4,5,6,7,8,9,10,1]
+	// repository.IsContained(samples)
+
+	// oooSeries 2500
+	// Write interval 10s
+	// 6 hr = 6 * 60 * 60 / 10 = 2160 samples per series
+	// 2500 * 2160 = 5400000 samples
+	// 32 bytes per sample
+	// 172800000 = 172 MB
+
 	c.queriesTotal.WithLabelValues(querySuccess).Inc()
 
 	err = verifySineWaveSamples(samples, c.cfg.ExpectedSeries, step)
