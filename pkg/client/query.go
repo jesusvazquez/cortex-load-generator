@@ -136,7 +136,7 @@ func (c *QueryClient) runQueryAndVerifyResult() {
 
 	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval)
 
-	samples, err := c.runQuery("sum(cortex_load_generator_sine_wave)", start, end, step)
+	samples, err := c.runRangeQuery("sum(cortex_load_generator_sine_wave)", start, end, step)
 	if err != nil {
 		level.Error(c.logger).Log("msg", "failed to execute query", "err", err)
 		c.queriesTotal.WithLabelValues(queryFailed).Inc()
@@ -162,19 +162,20 @@ func (c *QueryClient) runOOOQueryAndVerifyResult() {
 		c.queriesTotal.WithLabelValues(oooQuerySkipped).Add(float64(c.cfg.ExpectedOOOSeries))
 		return
 	}
-	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval) // TODO(jesus.vazquez) The step should be the write interval?
 
 	// We want to check that all samples in all series are alright
 	// Be careful when setting a high number of ExpectedOOOSeries
 	for i := 1; i <= c.cfg.ExpectedOOOSeries; i++ {
 		serie := fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i)
 		before := len(c.sampleRepository.SerieSamples[serie])
-		level.Error(c.logger).Log("msg", "JESUS TEST", "query start", start.UnixNano(), "query end", end.UnixNano(), "query step", step)
 		level.Error(c.logger).Log("msg", "JESUS TEST", "samples before trimming", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]), "trimming everything before", model.TimeFromUnixNano(start.UnixNano()))
 		c.sampleRepository.TrimSamplesBeforeTimestamp(serie, model.TimeFromUnixNano(start.UnixNano()))
 		level.Error(c.logger).Log("msg", "JESUS TEST", "trimmed samples", before-len(c.sampleRepository.SerieSamples[serie]))
 
-		samples, err := c.runQuery(serie, start, end, step)
+		queryAge := end.Sub(start)
+		query := fmt.Sprintf("%s[%s]", serie, queryAge)
+		level.Error(c.logger).Log("msg", "JESUS TEST", "query", query, "query end", end.UnixNano())
+		samples, err := c.runInstantQuery(serie, end)
 		if err != nil {
 			level.Error(c.logger).Log("msg", "failed to execute ooo query", "err", err)
 			c.queriesTotal.WithLabelValues(oooQueryFailed).Inc()
@@ -204,7 +205,7 @@ func (c *QueryClient) runOOOQueryAndVerifyResult() {
 	}
 }
 
-func (c *QueryClient) runQuery(query string, start, end time.Time, step time.Duration) ([]model.SamplePair, error) {
+func (c *QueryClient) runRangeQuery(query string, start, end time.Time, step time.Duration) ([]model.SamplePair, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.QueryTimeout)
 	defer cancel()
 
@@ -219,6 +220,37 @@ func (c *QueryClient) runQuery(query string, start, end time.Time, step time.Dur
 
 	if value.Type() != model.ValMatrix {
 		return nil, errors.New("was expecting to get a Matrix")
+	}
+
+	matrix, ok := value.(model.Matrix)
+	if !ok {
+		return nil, errors.New("failed to cast type to Matrix")
+	}
+
+	if len(matrix) != 1 {
+		return nil, fmt.Errorf("expected 1 series in the result but got %d", len(matrix))
+	}
+
+	var result []model.SamplePair
+	for _, stream := range matrix {
+		result = append(result, stream.Values...)
+	}
+
+	return result, nil
+}
+
+func (c *QueryClient) runInstantQuery(query string, ts time.Time) ([]model.SamplePair, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.QueryTimeout)
+	defer cancel()
+
+	value, _, err := c.client.Query(ctx, query, ts)
+	if err != nil {
+		return nil, err
+	}
+
+	if value.Type() != model.ValMatrix {
+		vector, _ := value.(model.Vector)
+		return nil, fmt.Errorf("was expecting to get a Matrix, current type %s vector %s", value.Type(), vector.String())
 	}
 
 	matrix, ok := value.(model.Matrix)
