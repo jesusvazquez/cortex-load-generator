@@ -168,37 +168,37 @@ func (c *QueryClient) runOOOQueryAndVerifyResult() {
 	for i := 1; i <= c.cfg.ExpectedOOOSeries; i++ {
 		serie := fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i)
 		before := len(c.sampleRepository.SerieSamples[serie])
-		level.Error(c.logger).Log("msg", "JESUS TEST", "samples before trimming", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]), "trimming everything before", model.TimeFromUnixNano(start.UnixNano()))
+		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "samples before trimming", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]), "trimming everything before", model.TimeFromUnixNano(start.UnixNano()))
 		c.sampleRepository.TrimSamplesBeforeTimestamp(serie, model.TimeFromUnixNano(start.UnixNano()))
-		level.Error(c.logger).Log("msg", "JESUS TEST", "trimmed samples", before-len(c.sampleRepository.SerieSamples[serie]))
+		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "trimmed samples", before-len(c.sampleRepository.SerieSamples[serie]))
 
 		queryAge := end.Sub(start)
 		query := fmt.Sprintf("%s[%s]", serie, queryAge)
-		level.Error(c.logger).Log("msg", "JESUS TEST", "query", query, "query end", end.UnixNano())
+		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "query", query, "query end", end.UnixNano())
 		samples, err := c.runInstantQuery(query, end)
 		if err != nil {
-			level.Error(c.logger).Log("msg", "failed to execute ooo query", "err", err)
+			level.Error(c.logger).Log("msg", "failed to execute ooo query", "wave", i, "err", err)
 			c.queriesTotal.WithLabelValues(oooQueryFailed).Inc()
-			return
+			continue
 		}
 
-		level.Error(c.logger).Log("msg", "JESUS TEST", "serie", serie, "samples returned", fmt.Sprintf("%s", samples))
-		level.Error(c.logger).Log("msg", "JESUS TEST", "serie", serie, "samples expected", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]))
-		level.Error(c.logger).Log("msg", "JESUS TEST", "serie", serie, "samples difference", fmt.Sprintf("%s", c.sampleRepository.Difference(serie, samples)))
+		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "serie", serie, "samples returned", fmt.Sprintf("%s", samples))
+		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "serie", serie, "samples expected", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]))
+		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "serie", serie, "samples difference", fmt.Sprintf("%s", c.sampleRepository.Difference(serie, samples)))
 
 		c.queriesTotal.WithLabelValues(oooQuerySuccess).Inc()
 
 		if !c.sampleRepository.MatchRepository(serie, samples) {
-			level.Warn(c.logger).Log("msg", "ooo query result comparison failed, query result is missing samples", "err", err)
+			level.Warn(c.logger).Log("msg", "wave", i, "ooo query result comparison failed, query result is missing samples", "err", err)
 			c.resultsComparedTotal.WithLabelValues(oooComparisonFailed).Inc()
-			return
+			continue
 		}
 
 		err = verifySineWaveSampleValues(samples, c.cfg.ExpectedOOOSeries)
 		if err != nil {
-			level.Warn(c.logger).Log("msg", "ooo query result comparison failed, some of the samples did not match the expected sine value", "err", err)
+			level.Warn(c.logger).Log("msg", "wave", i, "ooo query result comparison failed, some of the samples did not match the expected sine value", "err", err)
 			c.resultsComparedTotal.WithLabelValues(oooComparisonFailed).Inc()
-			return
+			continue
 		}
 
 		c.resultsComparedTotal.WithLabelValues(oooComparisonSuccess).Inc()

@@ -249,7 +249,7 @@ func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, inte
 			}},
 		})
 
-		level.Error(logger).Log("msg", "JESUS WRITE TEST", "appending sample value", model.SampleValue(sValue), "appending sample timestamp", model.Time(sTimestamp))
+		level.Error(logger).Log("msg", "JESUS WRITE TEST", "wave", strconv.Itoa(i), "appending sample value", model.SampleValue(sValue), "appending sample timestamp", model.Time(sTimestamp))
 		// Keep track of OOO samples in the repository
 		samplesRepository.Append(
 			fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i),

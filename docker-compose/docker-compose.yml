@@ -15,7 +15,7 @@ services:
   generator:
     hostname: generator
     image: cortex-load-generator
-    command: --remote-url http://prometheus:9090/api/v1/write --query-enabled=true --query-url=http://prometheus:9090 --max-out-of-order-time 1 --series-count 1 --out-of-order-series-count 1
+    command: --remote-url http://prometheus:9090/api/v1/write --query-enabled=true --query-url=http://prometheus:9090 --max-out-of-order-time 1 --series-count 1 --out-of-order-series-count 2
     expose:
      - 6060
     links:
