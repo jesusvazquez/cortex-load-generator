@@ -150,7 +150,7 @@ func (c *WriteClient) writeSeries() {
 
 	ts := alignTimestampToInterval(time.Now(), c.cfg.WriteInterval)
 	series1 := generateSineWaveSeries(ts, c.cfg.SeriesCount)
-	series2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval, c.samplesRepository)
+	series2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval, c.samplesRepository, c.logger)
 	writeSeries(series1)
 	writeSeries(series2)
 
@@ -225,12 +225,15 @@ func generateSineWaveSeries(t time.Time, seriesCount int) []*prompb.TimeSeries {
 	return out
 }
 
-func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, interval time.Duration, samplesRepository *SamplesRepository) []*prompb.TimeSeries {
+func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, interval time.Duration, samplesRepository *SamplesRepository, logger log.Logger) []*prompb.TimeSeries {
 	out := make([]*prompb.TimeSeries, 0, oooSeriesCount)
 	for i := 1; i <= oooSeriesCount; i++ {
 		diffMs := rand.Int63n(int64(maxOOOMins) * time.Minute.Milliseconds())
 		ts := t.Add(-time.Duration(diffMs) * time.Millisecond)
 		ts = alignTimestampToInterval(ts, interval)
+
+		sTimestamp := ts.UnixMilli()
+		sValue := gen.Sine(ts)
 
 		out = append(out, &prompb.TimeSeries{
 			Labels: []*prompb.Label{{
@@ -241,17 +244,18 @@ func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, inte
 				Value: strconv.Itoa(i),
 			}},
 			Samples: []prompb.Sample{{
-				Value:     gen.Sine(ts),
-				Timestamp: ts.UnixMilli(),
+				Value:     sValue,
+				Timestamp: sTimestamp,
 			}},
 		})
 
+		level.Error(logger).Log("msg", "JESUS WRITE TEST", "appending sample value", model.SampleValue(sValue), "appending sample timestamp", model.Time(sTimestamp))
 		// Keep track of OOO samples in the repository
 		samplesRepository.Append(
 			fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i),
 			model.SamplePair{
-				Timestamp: model.Time(ts.UnixMilli()),
-				Value:     model.SampleValue(gen.Sine(ts)),
+				Timestamp: model.Time(sTimestamp),
+				Value:     model.SampleValue(sValue),
 			},
 		)
 	}

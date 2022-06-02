@@ -157,18 +157,22 @@ func (c *QueryClient) runQueryAndVerifyResult() {
 
 func (c *QueryClient) runOOOQueryAndVerifyResult() {
 	start, end, ok := c.getQueryTimeRange(time.Now().UTC())
-	// Compute the query start/end time.
 	if !ok {
 		level.Debug(c.logger).Log("msg", "ooo queries skipped because of no eligible time range to query")
 		c.queriesTotal.WithLabelValues(oooQuerySkipped).Add(float64(c.cfg.ExpectedOOOSeries))
 		return
 	}
-	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval)
+	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval) // TODO(jesus.vazquez) The step should be the write interval?
 
 	// We want to check that all samples in all series are alright
 	// Be careful when setting a high number of ExpectedOOOSeries
 	for i := 1; i <= c.cfg.ExpectedOOOSeries; i++ {
 		serie := fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i)
+		before := len(c.sampleRepository.SerieSamples[serie])
+		level.Error(c.logger).Log("msg", "JESUS TEST", "query start", start.UnixNano(), "query end", end.UnixNano(), "query step", step)
+		level.Error(c.logger).Log("msg", "JESUS TEST", "samples before trimming", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]), "trimming everything before", model.TimeFromUnixNano(start.UnixNano()))
+		c.sampleRepository.TrimSamplesBeforeTimestamp(serie, model.TimeFromUnixNano(start.UnixNano()))
+		level.Error(c.logger).Log("msg", "JESUS TEST", "trimmed samples", before-len(c.sampleRepository.SerieSamples[serie]))
 
 		samples, err := c.runQuery(serie, start, end, step)
 		if err != nil {
@@ -179,6 +183,7 @@ func (c *QueryClient) runOOOQueryAndVerifyResult() {
 
 		level.Error(c.logger).Log("msg", "JESUS TEST", "serie", serie, "samples returned", fmt.Sprintf("%s", samples))
 		level.Error(c.logger).Log("msg", "JESUS TEST", "serie", serie, "samples expected", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]))
+		level.Error(c.logger).Log("msg", "JESUS TEST", "serie", serie, "samples difference", fmt.Sprintf("%s", c.sampleRepository.Difference(serie, samples)))
 
 		c.queriesTotal.WithLabelValues(oooQuerySuccess).Inc()
 
