@@ -39,6 +39,7 @@ func (s *SamplesRepository) Append(serie string, pair model.SamplePair) {
 // samples in the repository.
 func (s *SamplesRepository) MatchRepository(serie string, expectedSamples []model.SamplePair) bool {
 	s.RLock()
+	defer s.RUnlock()
 	if samples, ok := s.SerieSamples[serie]; ok {
 		if len(expectedSamples) > len(samples) ||
 			len(expectedSamples) < len(samples)-2 {
@@ -53,7 +54,6 @@ func (s *SamplesRepository) MatchRepository(serie string, expectedSamples []mode
 	} else {
 		return len(expectedSamples) == 0
 	}
-	defer s.RUnlock()
 	return true
 }
 
@@ -61,6 +61,7 @@ func (s *SamplesRepository) MatchRepository(serie string, expectedSamples []mode
 // timestamp.
 func (s *SamplesRepository) TrimSamplesBeforeTimestamp(serie string, ts model.Time) {
 	s.Lock()
+	defer s.Unlock()
 	if samples, ok := s.SerieSamples[serie]; ok {
 		var newSamples []model.SamplePair
 		for _, sample := range samples {
@@ -71,5 +72,21 @@ func (s *SamplesRepository) TrimSamplesBeforeTimestamp(serie string, ts model.Ti
 		}
 		s.SerieSamples[serie] = newSamples
 	}
-	defer s.Unlock()
+}
+
+func (s *SamplesRepository) Difference(serie string, inputSamples []model.SamplePair) []model.SamplePair {
+	var diff []model.SamplePair
+	tmp := make(map[model.Time]model.SamplePair)
+	if samples, ok := s.SerieSamples[serie]; ok {
+		for _, sample := range samples {
+			tmp[sample.Timestamp] = sample
+		}
+
+		for _, sample := range inputSamples {
+			if _, ok := tmp[sample.Timestamp]; !ok {
+				diff = append(diff, sample)
+			}
+		}
+	}
+	return diff
 }
