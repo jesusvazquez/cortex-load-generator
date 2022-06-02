@@ -4,20 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/pracucci/cortex-load-generator/pkg/expectation"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
+
+	"github.com/pracucci/cortex-load-generator/pkg/gen"
 )
 
 const (
+	maxComparisonDelta = 0.001
+
 	comparisonSuccess    = "success"
 	comparisonFailed     = "fail"
 	oooComparisonSuccess = "ooo_success"
@@ -47,18 +51,18 @@ type QueryClientConfig struct {
 }
 
 type QueryClient struct {
-	cfg       QueryClientConfig
-	client    v1.API
-	startTime time.Time
-	exp       *expectation.Expectation
-	logger    log.Logger
+	cfg              QueryClientConfig
+	client           v1.API
+	startTime        time.Time
+	sampleRepository *SamplesRepository
+	logger           log.Logger
 
 	// Metrics.
 	queriesTotal         *prometheus.CounterVec
 	resultsComparedTotal *prometheus.CounterVec
 }
 
-func NewQueryClient(cfg QueryClientConfig, exp *expectation.Expectation, logger log.Logger, reg prometheus.Registerer) *QueryClient {
+func NewQueryClient(cfg QueryClientConfig, samplesRepository *SamplesRepository, logger log.Logger, reg prometheus.Registerer) *QueryClient {
 	var rt http.RoundTripper = &http.Transport{}
 	rt = &clientRoundTripper{tenantID: cfg.TenantID, rt: rt}
 
@@ -73,11 +77,11 @@ func NewQueryClient(cfg QueryClientConfig, exp *expectation.Expectation, logger 
 	}
 
 	c := &QueryClient{
-		cfg:       cfg,
-		client:    v1.NewAPI(client),
-		startTime: time.Now().UTC(),
-		exp:       exp,
-		logger:    log.With(logger, "tenant", cfg.TenantID),
+		cfg:              cfg,
+		client:           v1.NewAPI(client),
+		startTime:        time.Now().UTC(),
+		sampleRepository: samplesRepository,
+		logger:           log.With(logger, "tenant", cfg.TenantID),
 
 		queriesTotal: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name:        "cortex_load_generator_queries_total",
@@ -103,66 +107,106 @@ func NewQueryClient(cfg QueryClientConfig, exp *expectation.Expectation, logger 
 }
 
 func (c *QueryClient) Start() {
-	go func() {
-		c.run()
-		ticker := time.NewTicker(c.cfg.QueryInterval)
-		for range ticker.C {
-			c.run()
-		}
-	}()
-
+	go c.run()
 }
 
 func (c *QueryClient) run() {
-	// Compute the query start/end time.
-	_, end, ok := c.getQueryTimeRange(time.Now().UTC())
-	if !ok {
-		level.Debug(c.logger).Log("msg", "queries skipped because of no eligible time range to query")
-		c.queriesTotal.WithLabelValues(querySkipped).Add(float64(c.cfg.ExpectedSeries))
-		c.queriesTotal.WithLabelValues(oooQuerySkipped).Add(float64(c.cfg.ExpectedOOOSeries))
-		return
-	}
+	c.runQueryAndVerifyResult()
+	c.runOOOQueryAndVerifyResult()
 
-	// TODO: something more clever than running all these queries at once. e.g. smoothing over time and/or only querying a subset
-	for i := 1; i <= c.cfg.ExpectedSeries; i++ {
-		q := fmt.Sprintf("cortex_load_generator_sine_wave{wave=\"%d\"}", i)
-		c.runQueryAndVerifyResult(q, end, queryFailed, querySuccess, comparisonSuccess, comparisonFailed)
-	}
-	for i := 1; i <= c.cfg.ExpectedOOOSeries; i++ {
-		qOOO := fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i)
-		c.runQueryAndVerifyResult(qOOO, end, oooQueryFailed, oooQuerySuccess, oooComparisonSuccess, oooComparisonFailed)
+	ticker := time.NewTicker(c.cfg.QueryInterval)
+
+	for {
+		select {
+		case <-ticker.C:
+			c.runQueryAndVerifyResult()
+			c.runOOOQueryAndVerifyResult()
+		}
 	}
 }
 
-func (c *QueryClient) runQueryAndVerifyResult(query string, end time.Time, lblFail, lblSuccess, lblMatch, lblNomatch string) {
+func (c *QueryClient) runQueryAndVerifyResult() {
+	// Compute the query start/end time.
+	start, end, ok := c.getQueryTimeRange(time.Now().UTC())
+	if !ok {
+		level.Debug(c.logger).Log("msg", "query skipped because of no eligible time range to query")
+		c.queriesTotal.WithLabelValues(querySkipped).Inc()
+		return
+	}
 
-	// TODO make this configurable and make it always match the [60s] below
-	start := end.Add(-time.Minute)
+	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval)
 
-	samples, err := c.runQuery(query+"[60s]", end)
+	samples, err := c.runQuery("sum(cortex_load_generator_sine_wave)", start, end, step)
 	if err != nil {
 		level.Error(c.logger).Log("msg", "failed to execute query", "err", err)
-		c.queriesTotal.WithLabelValues(lblFail).Inc()
+		c.queriesTotal.WithLabelValues(queryFailed).Inc()
 		return
 	}
 
-	c.queriesTotal.WithLabelValues(lblSuccess).Inc()
+	// Check samples against repository
+	// Write: 4,5 - 6,7,8,9,10 - 1,2,3 [4,5,6,7,8,9,10,1,2,3]
+	// Read: 8,9
+	// Check: [4,5,6,7,8,9,10,1,2,3], [4,5,6,7,8,9,10,1,2], [4,5,6,7,8,9,10,1]
+	// repository.IsContained(samples)
 
-	err = c.exp.Validate(query, start, end, samples)
+	// oooSeries 2500
+	// Write interval 10s
+	// 6 hr = 6 * 60 * 60 / 10 = 2160 samples per series
+	// 2500 * 2160 = 5400000 samples
+	// 32 bytes per sample
+	// 172800000 = 172 MB
+
+	c.queriesTotal.WithLabelValues(querySuccess).Inc()
+
+	err = verifySineWaveSamples(samples, c.cfg.ExpectedSeries, step)
 	if err != nil {
-		level.Warn(c.logger).Log("msg", "query result comparison failed", "start", start.UnixMilli(), "end", end.UnixMilli(), "err", err)
-		c.resultsComparedTotal.WithLabelValues(lblNomatch).Inc()
+		level.Warn(c.logger).Log("msg", "query result comparison failed", "err", err)
+		c.resultsComparedTotal.WithLabelValues(comparisonFailed).Inc()
 		return
 	}
 
-	c.resultsComparedTotal.WithLabelValues(lblMatch).Inc()
+	c.resultsComparedTotal.WithLabelValues(comparisonSuccess).Inc()
 }
 
-func (c *QueryClient) runQuery(query string, ts time.Time) ([]model.SamplePair, error) {
+func (c *QueryClient) runOOOQueryAndVerifyResult() {
+	// Compute the query start/end time.
+	start, end, ok := c.getQueryTimeRange(time.Now().UTC())
+	if !ok {
+		level.Debug(c.logger).Log("msg", "query skipped because of no eligible time range to query")
+		c.queriesTotal.WithLabelValues(oooQuerySkipped).Inc()
+		return
+	}
+
+	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval)
+
+	samples, err := c.runQuery("sum(cortex_load_generator_out_of_order_sine_wave)", start, end, step)
+	if err != nil {
+		level.Error(c.logger).Log("msg", "failed to execute ooo query", "err", err)
+		c.queriesTotal.WithLabelValues(oooQueryFailed).Inc()
+		return
+	}
+
+	c.queriesTotal.WithLabelValues(oooQuerySuccess).Inc()
+
+	err = verifySineWaveSampleValues(samples, c.cfg.ExpectedOOOSeries)
+	if err != nil {
+		level.Warn(c.logger).Log("msg", "ooo query result comparison failed", "err", err)
+		c.resultsComparedTotal.WithLabelValues(oooComparisonFailed).Inc()
+		return
+	}
+
+	c.resultsComparedTotal.WithLabelValues(oooComparisonSuccess).Inc()
+}
+
+func (c *QueryClient) runQuery(query string, start, end time.Time, step time.Duration) ([]model.SamplePair, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.QueryTimeout)
 	defer cancel()
 
-	value, _, err := c.client.Query(ctx, query, ts)
+	value, _, err := c.client.QueryRange(ctx, "sum(cortex_load_generator_sine_wave)", v1.Range{
+		Start: start,
+		End:   end,
+		Step:  step,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -177,18 +221,20 @@ func (c *QueryClient) runQuery(query string, ts time.Time) ([]model.SamplePair, 
 	}
 
 	if len(matrix) != 1 {
-
-		return nil, fmt.Errorf("query %q with ts %v (now is %v) -> expected 1 series in the result but got %d", query, ts, time.Now(), len(matrix))
+		return nil, fmt.Errorf("expected 1 series in the result but got %d", len(matrix))
 	}
 
-	return matrix[0].Values, nil
+	var result []model.SamplePair
+	for _, stream := range matrix {
+		result = append(result, stream.Values...)
+	}
+
+	return result, nil
 }
 
 func (c *QueryClient) getQueryTimeRange(now time.Time) (start, end time.Time, ok bool) {
 	// Do not query the last 2 scape interval to give enough time to all write
 	// requests to successfully complete.
-
-	// set end between now-2*writeInterval and now-3writeInterval
 	end = alignTimestampToInterval(now.Add(-2*c.cfg.ExpectedWriteInterval), c.cfg.ExpectedWriteInterval)
 
 	// Do not query before the start time because the config may have been different (eg. number of series).
@@ -203,4 +249,66 @@ func (c *QueryClient) getQueryTimeRange(now time.Time) (start, end time.Time, ok
 	ok = end.After(start)
 
 	return
+}
+
+func (c *QueryClient) getQueryStep(start, end time.Time, writeInterval time.Duration) time.Duration {
+	const maxSamples = 1000
+
+	// Compute the number of samples that we would have if we every single sample.
+	actualSamples := end.Sub(start) / writeInterval
+	if actualSamples <= maxSamples {
+		return writeInterval
+	}
+
+	// Adjust the query step based on the max steps spread over the query time range,
+	// rounding it to write interval.
+	step := end.Sub(start) / time.Duration(maxSamples)
+	step = ((step / writeInterval) + 1) * writeInterval
+
+	return step
+}
+
+func verifySineWaveSamples(samples []model.SamplePair, expectedSeries int, expectedStep time.Duration) error {
+	for idx, sample := range samples {
+		ts := time.UnixMilli(int64(sample.Timestamp)).UTC()
+
+		// Assert on value.
+		expectedValue := gen.Sine(ts)
+		if !compareSampleValues(float64(sample.Value), expectedValue*float64(expectedSeries)) {
+			return fmt.Errorf("sample at timestamp %d (%s) has value %f while was expecting %f", sample.Timestamp, ts.String(), sample.Value, expectedValue)
+		}
+
+		// Assert on sample timestamp. We expect no gaps.
+		if idx > 0 {
+			prevTs := time.UnixMilli(int64(samples[idx-1].Timestamp)).UTC()
+			expectedTs := prevTs.Add(expectedStep)
+
+			if ts.UnixMilli() != expectedTs.UnixMilli() {
+				return fmt.Errorf("sample at timestamp %d (%s) was expected to have timestamp %d (%s) because previous sample had timestamp %d (%s)",
+					sample.Timestamp, ts.String(), expectedTs.UnixMilli(), expectedTs.String(), prevTs.UnixMilli(), prevTs.String())
+			}
+		}
+	}
+
+	return nil
+}
+
+// verifySineWaveSampleValues checks only the correctness of values w.r.t. the timestamp.
+func verifySineWaveSampleValues(samples []model.SamplePair, expectedSeries int) error {
+	for _, sample := range samples {
+		ts := time.UnixMilli(int64(sample.Timestamp)).UTC()
+
+		// Assert on value.
+		expectedValue := gen.Sine(ts)
+		if !compareSampleValues(float64(sample.Value), expectedValue*float64(expectedSeries)) {
+			return fmt.Errorf("sample at timestamp %d (%s) has value %f while was expecting %f", sample.Timestamp, ts.String(), sample.Value, expectedValue)
+		}
+	}
+
+	return nil
+}
+
+func compareSampleValues(actual, expected float64) bool {
+	delta := math.Abs((actual - expected) / maxComparisonDelta)
+	return delta < maxComparisonDelta
 }

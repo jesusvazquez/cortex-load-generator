@@ -10,7 +10,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/pracucci/cortex-load-generator/pkg/client"
-	"github.com/pracucci/cortex-load-generator/pkg/expectation"
 	"github.com/pracucci/cortex-load-generator/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -62,7 +61,7 @@ func main() {
 	for t := 1; t <= *tenantsCount; t++ {
 		tenantID := fmt.Sprintf("load-generator-%d", t)
 
-		exp := expectation.NewExpectation()
+		sampleRepository := client.NewSamplesRepository()
 
 		writeClients = append(writeClients, client.NewWriteClient(client.WriteClientConfig{
 			URL:              **remoteURL,
@@ -74,7 +73,7 @@ func main() {
 			SeriesCount:      *seriesCount,
 			OOOSeriesCount:   *oooSeriesCount,
 			MaxOOOTime:       *maxOOOTime,
-		}, exp, logger, reg))
+		}, sampleRepository, logger, reg))
 
 		if *queryEnabled == "true" {
 			queryClient := client.NewQueryClient(client.QueryClientConfig{
@@ -86,7 +85,7 @@ func main() {
 				ExpectedSeries:        *seriesCount,
 				ExpectedOOOSeries:     *oooSeriesCount,
 				ExpectedWriteInterval: *remoteWriteInterval,
-			}, exp, logger, reg)
+			}, sampleRepository, logger, reg)
 
 			queryClient.Start()
 			queryClients = append(queryClients, queryClient)
