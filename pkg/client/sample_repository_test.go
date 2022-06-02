@@ -13,19 +13,16 @@ func TestSamplesRepository_Append(t *testing.T) {
 		repository   *SamplesRepository
 		inputSerie   string
 		inputSamples []model.SamplePair
+		expSamples   []model.SamplePair
 	}{
 		"append to an empty repository works": {
-			repository: NewSamplesRepository(),
-			inputSerie: "foo",
-			inputSamples: []model.SamplePair{
-				{
-					Value:     1,
-					Timestamp: 1,
-				},
-			},
+			repository:   NewSamplesRepository(),
+			inputSerie:   "foo",
+			inputSamples: testSamples(1),
+			expSamples:   testSamples(1),
 		},
 		"append to a non empty repository works": {
-			repository: testRepository("foo", []model.SamplePair{{0, 0}}),
+			repository: testRepository("foo", testSamples(1)),
 			inputSerie: "foo",
 			inputSamples: []model.SamplePair{
 				{
@@ -33,31 +30,62 @@ func TestSamplesRepository_Append(t *testing.T) {
 					Timestamp: 1,
 				},
 			},
+			expSamples: append(testSamples(1), model.SamplePair{
+				Value:     1,
+				Timestamp: 1,
+			}),
 		},
 		"appends are ordered": {
 			repository: testRepository("foo", []model.SamplePair{{0, 0}}),
 			inputSerie: "foo",
 			inputSamples: []model.SamplePair{
 				{
+					Value:     2,
+					Timestamp: 2,
+				},
+				{
 					Value:     1,
 					Timestamp: 1,
+				},
+			},
+			expSamples: []model.SamplePair{
+				{
+					Value:     0,
+					Timestamp: 0,
 				},
 				{
 					Value:     2,
 					Timestamp: 2,
 				},
+				{
+					Value:     1,
+					Timestamp: 1,
+				},
 			},
+		},
+		"duplicates are not appended": {
+			repository: testRepository("foo", testSamples(1)),
+			inputSerie: "foo",
+			inputSamples: []model.SamplePair{
+				{
+					Value:     1,
+					Timestamp: 1,
+				},
+				{
+					Value:     1,
+					Timestamp: 1,
+				},
+			},
+			expSamples: testSamples(2),
 		},
 	}
 
 	for testName, tc := range tests {
 		t.Run(testName, func(t *testing.T) {
-			initSamples := tc.repository.SerieSamples[tc.inputSerie]
 			for _, sample := range tc.inputSamples {
 				tc.repository.Append(tc.inputSerie, sample)
 			}
-			expSamples := append(initSamples, tc.inputSamples...)
-			assert.Equal(t, tc.repository.SerieSamples[tc.inputSerie], expSamples)
+			assert.Equal(t, tc.expSamples, tc.repository.SerieSamples[tc.inputSerie])
 		})
 	}
 }
@@ -165,6 +193,11 @@ func TestSamplesRepository_TrimSamplesBeforeTimestamp(t *testing.T) {
 			// Trimming twice to make sure its consistent
 			tc.repository.TrimSamplesBeforeTimestamp(tc.inputSerie, tc.inputTimestamp)
 			assert.Equal(t, tc.expSamples, tc.repository.SerieSamples[tc.inputSerie])
+
+			// Make sure that the list of known timestamps is also trimmed
+			for ts := range tc.repository.KnownTimestamps {
+				assert.GreaterOrEqual(t, ts, tc.inputTimestamp, "known timestamp element timestamp should be greater or equal")
+			}
 		})
 	}
 }

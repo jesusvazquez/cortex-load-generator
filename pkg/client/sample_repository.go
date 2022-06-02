@@ -7,22 +7,34 @@ import (
 )
 
 type SamplesRepository struct {
-	SerieSamples map[string][]model.SamplePair
+	SerieSamples    map[string][]model.SamplePair
+	KnownTimestamps map[model.Time]struct{}
 	sync.RWMutex
 }
 
 func NewSamplesRepository() *SamplesRepository {
-	serieSamples := map[string][]model.SamplePair{}
+	serieSamples := make(map[string][]model.SamplePair)
+	timestamps := make(map[model.Time]struct{})
 	return &SamplesRepository{
-		SerieSamples: serieSamples,
+		SerieSamples:    serieSamples,
+		KnownTimestamps: timestamps,
 	}
 }
 
 // Append appends a new series sample to the SamplesRepository.
 // It always appends at the end of the slice.
+// If the repository already has a sample for a given timestamp it will not
+// be appended.
 func (s *SamplesRepository) Append(serie string, pair model.SamplePair) {
 	s.Lock()
 	defer s.Unlock()
+
+	// If its a duplicate we dont append it
+	if _, ok := s.KnownTimestamps[pair.Timestamp]; ok {
+		return
+	}
+	s.KnownTimestamps[pair.Timestamp] = struct{}{}
+
 	if samples, ok := s.SerieSamples[serie]; ok {
 		samples = append(samples, pair)
 		s.SerieSamples[serie] = samples
@@ -66,6 +78,7 @@ func (s *SamplesRepository) TrimSamplesBeforeTimestamp(serie string, ts model.Ti
 		var newSamples []model.SamplePair
 		for _, sample := range samples {
 			if sample.Timestamp < ts {
+				delete(s.KnownTimestamps, sample.Timestamp)
 				continue
 			}
 			newSamples = append(newSamples, sample)
