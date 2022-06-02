@@ -3,7 +3,7 @@ version: '2'
 services:
   prometheus:
     hostname: prometheus
-    image: prom/prometheus:out-of-order
+    image: prom/prometheus-linux-amd64:out-of-order
     command: --web.enable-remote-write-receiver --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.ooo-allowance=60m
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml

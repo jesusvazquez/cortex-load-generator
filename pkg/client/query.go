@@ -156,45 +156,54 @@ func (c *QueryClient) runQueryAndVerifyResult() {
 }
 
 func (c *QueryClient) runOOOQueryAndVerifyResult() {
-	// Compute the query start/end time.
 	start, end, ok := c.getQueryTimeRange(time.Now().UTC())
+	// Compute the query start/end time.
 	if !ok {
-		level.Debug(c.logger).Log("msg", "query skipped because of no eligible time range to query")
-		c.queriesTotal.WithLabelValues(oooQuerySkipped).Inc()
+		level.Debug(c.logger).Log("msg", "ooo queries skipped because of no eligible time range to query")
+		c.queriesTotal.WithLabelValues(oooQuerySkipped).Add(float64(c.cfg.ExpectedOOOSeries))
 		return
 	}
-
 	step := c.getQueryStep(start, end, c.cfg.ExpectedWriteInterval)
 
-	samples, err := c.runQuery("sum(cortex_load_generator_out_of_order_sine_wave)", start, end, step)
-	if err != nil {
-		level.Error(c.logger).Log("msg", "failed to execute ooo query", "err", err)
-		c.queriesTotal.WithLabelValues(oooQueryFailed).Inc()
-		return
+	// We want to check that all samples in all series are alright
+	// Be careful when setting a high number of ExpectedOOOSeries
+	for i := 1; i <= c.cfg.ExpectedOOOSeries; i++ {
+		serie := fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i)
+
+		samples, err := c.runQuery(serie, start, end, step)
+		if err != nil {
+			level.Error(c.logger).Log("msg", "failed to execute ooo query", "err", err)
+			c.queriesTotal.WithLabelValues(oooQueryFailed).Inc()
+			return
+		}
+
+		level.Error(c.logger).Log("msg", "JESUS TEST", "serie", serie, "samples returned", fmt.Sprintf("%s", samples))
+		level.Error(c.logger).Log("msg", "JESUS TEST", "serie", serie, "samples expected", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]))
+
+		c.queriesTotal.WithLabelValues(oooQuerySuccess).Inc()
+
+		if !c.sampleRepository.MatchRepository(serie, samples) {
+			level.Warn(c.logger).Log("msg", "ooo query result comparison failed, query result is missing samples", "err", err)
+			c.resultsComparedTotal.WithLabelValues(oooComparisonFailed).Inc()
+			return
+		}
+
+		err = verifySineWaveSampleValues(samples, c.cfg.ExpectedOOOSeries)
+		if err != nil {
+			level.Warn(c.logger).Log("msg", "ooo query result comparison failed, some of the samples did not match the expected sine value", "err", err)
+			c.resultsComparedTotal.WithLabelValues(oooComparisonFailed).Inc()
+			return
+		}
+
+		c.resultsComparedTotal.WithLabelValues(oooComparisonSuccess).Inc()
 	}
-
-	c.queriesTotal.WithLabelValues(oooQuerySuccess).Inc()
-
-	c.sampleRepository.MatchRepository(
-		fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", 1),
-		samples,
-	)
-
-	err = verifySineWaveSampleValues(samples, c.cfg.ExpectedOOOSeries)
-	if err != nil {
-		level.Warn(c.logger).Log("msg", "ooo query result comparison failed, some of the samples did not match the expected sine value", "err", err)
-		c.resultsComparedTotal.WithLabelValues(oooComparisonFailed).Inc()
-		return
-	}
-
-	c.resultsComparedTotal.WithLabelValues(oooComparisonSuccess).Inc()
 }
 
 func (c *QueryClient) runQuery(query string, start, end time.Time, step time.Duration) ([]model.SamplePair, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.QueryTimeout)
 	defer cancel()
 
-	value, _, err := c.client.QueryRange(ctx, "sum(cortex_load_generator_sine_wave)", v1.Range{
+	value, _, err := c.client.QueryRange(ctx, query, v1.Range{
 		Start: start,
 		End:   end,
 		Step:  step,
