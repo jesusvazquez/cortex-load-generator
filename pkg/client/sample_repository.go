@@ -31,13 +31,13 @@ func (s *SamplesRepository) Append(serie string, pair model.SamplePair) {
 	}
 }
 
-// IsContained checks if the given list of expectedSamples is a subset of the
+// MatchRepository checks if the given list of expectedSamples is a subset of the
 // samples contained in the repository for a given serie.
 // It is considered a matching subset if it matches all the samples contained
 // in the repository in strict order.
 // It will still match if the expectedSamples input misses up to the last two
 // samples in the repository.
-func (s *SamplesRepository) IsContained(serie string, expectedSamples []model.SamplePair) bool {
+func (s *SamplesRepository) MatchRepository(serie string, expectedSamples []model.SamplePair) bool {
 	s.RLock()
 	if samples, ok := s.SerieSamples[serie]; ok {
 		if len(expectedSamples) > len(samples) ||

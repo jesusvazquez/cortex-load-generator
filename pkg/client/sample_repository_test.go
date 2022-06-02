@@ -115,7 +115,7 @@ func TestSamplesRepository_IsContained(t *testing.T) {
 
 	for testName, tc := range tests {
 		t.Run(testName, func(t *testing.T) {
-			assert.Equal(t, tc.expContained, tc.repository.IsContained(tc.expSerie, tc.expSamples))
+			assert.Equal(t, tc.expContained, tc.repository.MatchRepository(tc.expSerie, tc.expSamples))
 		})
 	}
 }
