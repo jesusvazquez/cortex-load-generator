@@ -1,6 +1,7 @@
 package client
 
 import (
+	"sort"
 	"sync"
 
 	"github.com/prometheus/common/model"
@@ -22,7 +23,7 @@ func NewSamplesRepository() *SamplesRepository {
 }
 
 // Append appends a new series sample to the SamplesRepository.
-// It always appends at the end of the slice.
+// The samples will be kept in a sorted slice by min timestamp.
 // If the repository already has a sample for a given timestamp it will not
 // be appended.
 func (s *SamplesRepository) Append(serie string, pair model.SamplePair) {
@@ -37,6 +38,9 @@ func (s *SamplesRepository) Append(serie string, pair model.SamplePair) {
 
 	if samples, ok := s.SerieSamples[serie]; ok {
 		samples = append(samples, pair)
+		sort.Slice(samples, func(i, j int) bool {
+			return samples[i].Timestamp < samples[j].Timestamp
+		})
 		s.SerieSamples[serie] = samples
 	} else {
 		s.SerieSamples[serie] = []model.SamplePair{pair}

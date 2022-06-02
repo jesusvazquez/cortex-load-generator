@@ -35,7 +35,7 @@ func TestSamplesRepository_Append(t *testing.T) {
 				Timestamp: 1,
 			}),
 		},
-		"appends are ordered": {
+		"repository appended samples are ordered": {
 			repository: testRepository("foo", []model.SamplePair{{0, 0}}),
 			inputSerie: "foo",
 			inputSamples: []model.SamplePair{
@@ -54,12 +54,12 @@ func TestSamplesRepository_Append(t *testing.T) {
 					Timestamp: 0,
 				},
 				{
-					Value:     2,
-					Timestamp: 2,
-				},
-				{
 					Value:     1,
 					Timestamp: 1,
+				},
+				{
+					Value:     2,
+					Timestamp: 2,
 				},
 			},
 		},
