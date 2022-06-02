@@ -175,7 +175,7 @@ func (c *QueryClient) runOOOQueryAndVerifyResult() {
 		queryAge := end.Sub(start)
 		query := fmt.Sprintf("%s[%s]", serie, queryAge)
 		level.Error(c.logger).Log("msg", "JESUS TEST", "query", query, "query end", end.UnixNano())
-		samples, err := c.runInstantQuery(serie, end)
+		samples, err := c.runInstantQuery(query, end)
 		if err != nil {
 			level.Error(c.logger).Log("msg", "failed to execute ooo query", "err", err)
 			c.queriesTotal.WithLabelValues(oooQueryFailed).Inc()
@@ -249,8 +249,7 @@ func (c *QueryClient) runInstantQuery(query string, ts time.Time) ([]model.Sampl
 	}
 
 	if value.Type() != model.ValMatrix {
-		vector, _ := value.(model.Vector)
-		return nil, fmt.Errorf("was expecting to get a Matrix, current type %s vector %s", value.Type(), vector.String())
+		return nil, errors.New("was expecting to get a Matrix")
 	}
 
 	matrix, ok := value.(model.Matrix)
