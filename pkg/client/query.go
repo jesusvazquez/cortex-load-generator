@@ -167,24 +167,16 @@ func (c *QueryClient) runOOOQueryAndVerifyResult() {
 	// Be careful when setting a high number of ExpectedOOOSeries
 	for i := 1; i <= c.cfg.ExpectedOOOSeries; i++ {
 		serie := fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i)
-		before := len(c.sampleRepository.SerieSamples[serie])
-		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "samples before trimming", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]), "trimming everything before", model.TimeFromUnixNano(start.UnixNano()))
 		c.sampleRepository.TrimSamplesBeforeTimestamp(serie, model.TimeFromUnixNano(start.UnixNano()))
-		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "trimmed samples", before-len(c.sampleRepository.SerieSamples[serie]))
 
 		queryAge := end.Sub(start)
 		query := fmt.Sprintf("%s[%s]", serie, queryAge)
-		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "query", query, "query end", end.UnixNano())
 		samples, err := c.runInstantQuery(query, end)
 		if err != nil {
 			level.Error(c.logger).Log("msg", "failed to execute ooo query", "wave", i, "err", err)
 			c.queriesTotal.WithLabelValues(oooQueryFailed).Inc()
 			continue
 		}
-
-		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "serie", serie, "samples returned", fmt.Sprintf("%s", samples))
-		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "serie", serie, "samples expected", fmt.Sprintf("%s", c.sampleRepository.SerieSamples[serie]))
-		level.Error(c.logger).Log("msg", "JESUS TEST", "wave", i, "serie", serie, "samples difference", fmt.Sprintf("%s", c.sampleRepository.Difference(serie, samples)))
 
 		c.queriesTotal.WithLabelValues(oooQuerySuccess).Inc()
 

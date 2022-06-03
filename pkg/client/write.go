@@ -150,7 +150,7 @@ func (c *WriteClient) writeSeries() {
 
 	ts := alignTimestampToInterval(time.Now(), c.cfg.WriteInterval)
 	series1 := generateSineWaveSeries(ts, c.cfg.SeriesCount)
-	series2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval, c.samplesRepository, c.logger)
+	series2 := generateOOOSineWaveSeries(ts, c.cfg.OOOSeriesCount, c.cfg.MaxOOOTime, c.cfg.WriteInterval, c.samplesRepository)
 	writeSeries(series1)
 	writeSeries(series2)
 
@@ -225,7 +225,7 @@ func generateSineWaveSeries(t time.Time, seriesCount int) []*prompb.TimeSeries {
 	return out
 }
 
-func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, interval time.Duration, samplesRepository *SamplesRepository, logger log.Logger) []*prompb.TimeSeries {
+func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, interval time.Duration, samplesRepository *SamplesRepository) []*prompb.TimeSeries {
 	out := make([]*prompb.TimeSeries, 0, oooSeriesCount)
 	for i := 1; i <= oooSeriesCount; i++ {
 		diffMs := rand.Int63n(int64(maxOOOMins) * time.Minute.Milliseconds())
@@ -249,7 +249,6 @@ func generateOOOSineWaveSeries(t time.Time, oooSeriesCount, maxOOOMins int, inte
 			}},
 		})
 
-		level.Error(logger).Log("msg", "JESUS WRITE TEST", "wave", strconv.Itoa(i), "appending sample value", model.SampleValue(sValue), "appending sample timestamp", model.Time(sTimestamp))
 		// Keep track of OOO samples in the repository
 		samplesRepository.Append(
 			fmt.Sprintf("cortex_load_generator_out_of_order_sine_wave{wave=\"%d\"}", i),

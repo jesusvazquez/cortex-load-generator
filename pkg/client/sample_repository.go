@@ -78,7 +78,6 @@ func (s *SamplesRepository) MatchRepository(serie string, expectedSamples []mode
 	} else {
 		return len(expectedSamples) == 0
 	}
-	return true
 }
 
 // TrimSamplesBeforeTimestamp removes all the samples for a serie before a given
