@@ -90,21 +90,21 @@ func TestSamplesRepository_Append(t *testing.T) {
 	}
 }
 
-func TestSamplesRepository_IsContained(t *testing.T) {
+func TestSamplesRepository_MatchRepository(t *testing.T) {
 	tests := map[string]struct {
-		test         string
-		repository   *SamplesRepository
-		expSerie     string
-		expSamples   []model.SamplePair
-		expContained bool
+		test       string
+		repository *SamplesRepository
+		expSerie   string
+		expSamples []model.SamplePair
+		expMatch   bool
 	}{
-		"empty sample series is contained": {
-			repository:   NewSamplesRepository(),
-			expSerie:     "foo",
-			expSamples:   []model.SamplePair{},
-			expContained: true,
+		"empty sample series match an empty repository": {
+			repository: NewSamplesRepository(),
+			expSerie:   "foo",
+			expSamples: []model.SamplePair{},
+			expMatch:   true,
 		},
-		"more input samples than repository samples is not contained": {
+		"more input samples than repository samples does not match": {
 			repository: NewSamplesRepository(),
 			expSerie:   "foo",
 			expSamples: []model.SamplePair{
@@ -113,37 +113,37 @@ func TestSamplesRepository_IsContained(t *testing.T) {
 					Value:     1,
 				},
 			},
-			expContained: false,
+			expMatch: false,
 		},
-		"same list of samples is contained": {
-			repository:   testRepository("foo", testSamples(5)),
-			expSerie:     "foo",
-			expSamples:   testSamples(5),
-			expContained: true,
+		"same list of samples matches": {
+			repository: testRepository("foo", testSamples(5)),
+			expSerie:   "foo",
+			expSamples: testSamples(5),
+			expMatch:   true,
 		},
 		"same list of samples minus one is still contained": {
-			repository:   testRepository("foo", testSamples(5)),
-			expSerie:     "foo",
-			expSamples:   testSamples(4),
-			expContained: true,
+			repository: testRepository("foo", testSamples(5)),
+			expSerie:   "foo",
+			expSamples: testSamples(4),
+			expMatch:   true,
 		},
 		"same list of samples minus two is still contained": {
-			repository:   testRepository("foo", testSamples(5)),
-			expSerie:     "foo",
-			expSamples:   testSamples(3),
-			expContained: true,
+			repository: testRepository("foo", testSamples(5)),
+			expSerie:   "foo",
+			expSamples: testSamples(3),
+			expMatch:   true,
 		},
 		"same list of samples minus three or more is not contained": {
-			repository:   testRepository("foo", testSamples(5)),
-			expSerie:     "foo",
-			expSamples:   testSamples(2),
-			expContained: false,
+			repository: testRepository("foo", testSamples(5)),
+			expSerie:   "foo",
+			expSamples: testSamples(2),
+			expMatch:   false,
 		},
 	}
 
 	for testName, tc := range tests {
 		t.Run(testName, func(t *testing.T) {
-			assert.Equal(t, tc.expContained, tc.repository.MatchRepository(tc.expSerie, tc.expSamples))
+			assert.Equal(t, tc.expMatch, tc.repository.MatchRepository(tc.expSerie, tc.expSamples))
 		})
 	}
 }

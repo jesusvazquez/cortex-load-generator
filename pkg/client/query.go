@@ -194,13 +194,6 @@ func (c *QueryClient) runOOOQueryAndVerifyResult() {
 			continue
 		}
 
-		err = verifySineWaveSampleValues(samples, c.cfg.ExpectedOOOSeries)
-		if err != nil {
-			level.Warn(c.logger).Log("msg", "wave", i, "ooo query result comparison failed, some of the samples did not match the expected sine value", "err", err)
-			c.resultsComparedTotal.WithLabelValues(oooComparisonFailed).Inc()
-			continue
-		}
-
 		c.resultsComparedTotal.WithLabelValues(oooComparisonSuccess).Inc()
 	}
 }

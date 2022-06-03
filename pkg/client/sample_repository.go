@@ -9,13 +9,13 @@ import (
 
 type SamplesRepository struct {
 	SerieSamples    map[string][]model.SamplePair
-	KnownTimestamps map[model.Time]struct{}
+	KnownTimestamps map[string]map[model.Time]struct{}
 	sync.RWMutex
 }
 
 func NewSamplesRepository() *SamplesRepository {
 	serieSamples := make(map[string][]model.SamplePair)
-	timestamps := make(map[model.Time]struct{})
+	timestamps := make(map[string]map[model.Time]struct{})
 	return &SamplesRepository{
 		SerieSamples:    serieSamples,
 		KnownTimestamps: timestamps,
@@ -30,11 +30,14 @@ func (s *SamplesRepository) Append(serie string, pair model.SamplePair) {
 	s.Lock()
 	defer s.Unlock()
 
-	// If its a duplicate we dont append it
-	if _, ok := s.KnownTimestamps[pair.Timestamp]; ok {
-		return
+	if kt, ok := s.KnownTimestamps[serie]; ok {
+		if _, ok = kt[pair.Timestamp]; ok {
+			return
+		}
+	} else {
+		s.KnownTimestamps[serie] = make(map[model.Time]struct{})
 	}
-	s.KnownTimestamps[pair.Timestamp] = struct{}{}
+	s.KnownTimestamps[serie][pair.Timestamp] = struct{}{}
 
 	if samples, ok := s.SerieSamples[serie]; ok {
 		samples = append(samples, pair)
@@ -50,23 +53,28 @@ func (s *SamplesRepository) Append(serie string, pair model.SamplePair) {
 // MatchRepository checks if the given list of expectedSamples is a subset of the
 // samples contained in the repository for a given serie.
 // It is considered a matching subset if it matches all the samples contained
-// in the repository in strict order.
+// in the repository.
 // It will still match if the expectedSamples input misses up to the last two
 // samples in the repository.
 func (s *SamplesRepository) MatchRepository(serie string, expectedSamples []model.SamplePair) bool {
 	s.RLock()
 	defer s.RUnlock()
-	if samples, ok := s.SerieSamples[serie]; ok {
-		if len(expectedSamples) > len(samples) ||
-			len(expectedSamples) < len(samples)-2 {
+	if storedSamples, ok := s.SerieSamples[serie]; ok {
+		if len(expectedSamples) > len(storedSamples) ||
+			len(expectedSamples) < len(storedSamples)-2 {
 			return false
 		}
 
-		for i, sample := range expectedSamples {
-			if samples[i].Value != sample.Value || samples[i].Timestamp != sample.Timestamp {
-				return false
+		match := 0
+		for _, sample := range expectedSamples {
+			for _, storedSample := range storedSamples {
+				if storedSample.Value == sample.Value || storedSample.Timestamp == sample.Timestamp {
+					match++
+					break
+				}
 			}
 		}
+		return match >= len(expectedSamples)-2
 	} else {
 		return len(expectedSamples) == 0
 	}
@@ -80,9 +88,10 @@ func (s *SamplesRepository) TrimSamplesBeforeTimestamp(serie string, ts model.Ti
 	defer s.Unlock()
 	if samples, ok := s.SerieSamples[serie]; ok {
 		var newSamples []model.SamplePair
+		kts := s.KnownTimestamps[serie]
 		for _, sample := range samples {
 			if sample.Timestamp < ts {
-				delete(s.KnownTimestamps, sample.Timestamp)
+				delete(kts, sample.Timestamp)
 				continue
 			}
 			newSamples = append(newSamples, sample)
