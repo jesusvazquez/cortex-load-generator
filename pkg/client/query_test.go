@@ -8,6 +8,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pracucci/cortex-load-generator/pkg/gen"
 )
 
 func TestQueryClient_GetQueryTimeRange(t *testing.T) {
@@ -39,7 +41,7 @@ func TestQueryClient_GetQueryTimeRange(t *testing.T) {
 
 	for testName, testData := range tests {
 		t.Run(testName, func(t *testing.T) {
-			client := NewQueryClient(testData.cfg, log.NewNopLogger(), prometheus.NewPedanticRegistry())
+			client := NewQueryClient(testData.cfg, NewSamplesRepository(), log.NewNopLogger(), prometheus.NewPedanticRegistry())
 			client.startTime = testData.startTime
 
 			actualStart, actualEnd, actualOK := client.getQueryTimeRange(testData.now)
@@ -76,7 +78,7 @@ func TestQueryClient_GetQueryStep(t *testing.T) {
 
 	for testName, testData := range tests {
 		t.Run(testName, func(t *testing.T) {
-			client := NewQueryClient(QueryClientConfig{}, log.NewNopLogger(), prometheus.NewPedanticRegistry())
+			client := NewQueryClient(QueryClientConfig{}, NewSamplesRepository(), log.NewNopLogger(), prometheus.NewPedanticRegistry())
 
 			actualStep := client.getQueryStep(testData.start, testData.end, testData.writeInterval)
 			assert.Equal(t, testData.expectedStep, actualStep)
@@ -96,9 +98,9 @@ func TestVerifySineWaveSamples(t *testing.T) {
 	}{
 		"should return no error if all samples value and timestamp match the expected one (1 series)": {
 			samples: []model.SamplePair{
-				newSamplePair(now.Add(10*time.Second), generateSineWaveValue(now.Add(10*time.Second))),
-				newSamplePair(now.Add(20*time.Second), generateSineWaveValue(now.Add(20*time.Second))),
-				newSamplePair(now.Add(30*time.Second), generateSineWaveValue(now.Add(30*time.Second))),
+				newSamplePair(now.Add(10*time.Second), gen.Sine(now.Add(10*time.Second))),
+				newSamplePair(now.Add(20*time.Second), gen.Sine(now.Add(20*time.Second))),
+				newSamplePair(now.Add(30*time.Second), gen.Sine(now.Add(30*time.Second))),
 			},
 			expectedSeries: 1,
 			expectedStep:   10 * time.Second,
@@ -106,9 +108,9 @@ func TestVerifySineWaveSamples(t *testing.T) {
 		},
 		"should return no error if all samples value and timestamp match the expected one (multiple series)": {
 			samples: []model.SamplePair{
-				newSamplePair(now.Add(10*time.Second), 5*generateSineWaveValue(now.Add(10*time.Second))),
-				newSamplePair(now.Add(20*time.Second), 5*generateSineWaveValue(now.Add(20*time.Second))),
-				newSamplePair(now.Add(30*time.Second), 5*generateSineWaveValue(now.Add(30*time.Second))),
+				newSamplePair(now.Add(10*time.Second), 5*gen.Sine(now.Add(10*time.Second))),
+				newSamplePair(now.Add(20*time.Second), 5*gen.Sine(now.Add(20*time.Second))),
+				newSamplePair(now.Add(30*time.Second), 5*gen.Sine(now.Add(30*time.Second))),
 			},
 			expectedSeries: 5,
 			expectedStep:   10 * time.Second,
@@ -116,9 +118,9 @@ func TestVerifySineWaveSamples(t *testing.T) {
 		},
 		"should return error if there's a missing series": {
 			samples: []model.SamplePair{
-				newSamplePair(now.Add(10*time.Second), 4*generateSineWaveValue(now.Add(10*time.Second))),
-				newSamplePair(now.Add(20*time.Second), 4*generateSineWaveValue(now.Add(20*time.Second))),
-				newSamplePair(now.Add(30*time.Second), 4*generateSineWaveValue(now.Add(30*time.Second))),
+				newSamplePair(now.Add(10*time.Second), 4*gen.Sine(now.Add(10*time.Second))),
+				newSamplePair(now.Add(20*time.Second), 4*gen.Sine(now.Add(20*time.Second))),
+				newSamplePair(now.Add(30*time.Second), 4*gen.Sine(now.Add(30*time.Second))),
 			},
 			expectedSeries: 5,
 			expectedStep:   10 * time.Second,
@@ -126,8 +128,8 @@ func TestVerifySineWaveSamples(t *testing.T) {
 		},
 		"should return error if there's a missing sample": {
 			samples: []model.SamplePair{
-				newSamplePair(now.Add(10*time.Second), 5*generateSineWaveValue(now.Add(10*time.Second))),
-				newSamplePair(now.Add(30*time.Second), 5*generateSineWaveValue(now.Add(30*time.Second))),
+				newSamplePair(now.Add(10*time.Second), 5*gen.Sine(now.Add(10*time.Second))),
+				newSamplePair(now.Add(30*time.Second), 5*gen.Sine(now.Add(30*time.Second))),
 			},
 			expectedSeries: 5,
 			expectedStep:   10 * time.Second,

@@ -3,7 +3,7 @@ version: '2'
 services:
   prometheus:
     hostname: prometheus
-    image: prom/prometheus:out-of-order
+    image: prom/prometheus-linux-amd64:out-of-order
     command: --web.enable-remote-write-receiver --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.ooo-allowance=60m
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
@@ -15,7 +15,7 @@ services:
   generator:
     hostname: generator
     image: cortex-load-generator
-    command: --remote-url http://prometheus:9090/api/v1/write --query-enabled=true --query-url=http://prometheus:9090 --max-out-of-order-time 1 --series-count 1 --out-of-order-series-count 1
+    command: --remote-url http://prometheus:9090/api/v1/write --query-enabled=true --query-url=http://prometheus:9090 --max-out-of-order-time 5 --series-count 1 --out-of-order-series-count 100
     expose:
      - 6060
     links:
